@@ -1,0 +1,56 @@
+seed: 42
+
+data:
+  state_dim: 12
+  action_dim: 4
+  sequence_length: 51
+  dt: 0.02
+  train_trajectories: 1000
+  val_trajectories: 100
+  test_trajectories: 200
+  train_wind_min: 0.0
+  train_wind_max: 4.0
+  test_wind_min: 4.0
+  test_wind_max: 8.0
+
+physics:
+  mass: 1.0
+  gravity: 9.81
+  arm_length: 0.17
+  kf: 1.0e-5
+  km: 1.0e-6
+  inertia:
+    - 0.005
+    - 0.005
+    - 0.009
+
+model:
+  latent_dim: 128
+  hidden_dim: 256
+  residual_hidden_dim: 256
+  num_layers: 2
+  dropout: 0.0
+
+training:
+  batch_size: 64
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  grad_clip: 1.0
+  burn_in: 5
+  rollout_horizon: 20
+  gamma: 0.99
+  lambda_position: 1.0
+  lambda_velocity: 1.0
+  lambda_rotation: 1.0
+  lambda_angular_velocity: 1.0
+  lambda_residual_smooth: 0.001
+
+evaluation:
+  horizons:
+    - 5
+    - 10
+    - 20
+    - 50
+    - 100
+  position_threshold: 0.5
