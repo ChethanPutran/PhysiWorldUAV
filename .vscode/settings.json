@@ -1,0 +1,15 @@
+{
+    "python.analysis.extraPaths": [
+        "/isaac-sim/python_packages",
+        "/isaac-sim/kit/python/lib/python3.10/site-packages",
+        "/isaac-sim/exts",
+        "/workspace/PhysiWorldUAV/omnidrones_env/lib/python3.10/site-packages",
+        "/workspace/PhysiWorldUAV/Omnidrones",
+        "/data2/chethan/mtech/PhysiWorldUAV/omnidrones_env/lib/python3.10/site-packages",
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "error",
+        "reportMissingModuleSource": "error"
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}

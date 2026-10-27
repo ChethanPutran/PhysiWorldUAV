@@ -1,13 +1,15 @@
 [project]
 name = "physiworld-uav"
 version = "0.1.0"
-description = "Add your description here"
+description = "Physics-prior latent world models for reliable long-horizon UAV prediction under OOD wind disturbances"
 readme = "README.md"
+requires-python = ">=3.10,<3.11"
 authors = [
-    { name = "Chethan", email = "chethansputran222@gmail.com" }
+{ name = "Chethan", email = "[chethansputran222@gmail.com](mailto:chethansputran222@gmail.com)" }
 ]
-requires-python = ">=3.12"
-dependencies = []
+
+dependencies = [
+]
 
 [project.scripts]
 physiworld-uav = "physiworld_uav:main"

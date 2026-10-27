@@ -1,0 +1,121 @@
+# Experiment A — Uniform steady wind
+# Goal: Establish a baseline for UAV dynamics prediction.
+
+# Use the existing steady wind and disable all additional profiles and gusts.
+
+wind:
+  steady_wind_xyz: [2.0, 0.0, 0.0]
+  type: "none"
+  gust_enabled: false
+
+# Generate multiple trajectories with fixed wind conditions, then repeat with steady speeds such as 0, 1, 2, and 4 m/s.
+# - Wind is identical at every point in space at a given time.
+# - Wind is constant over time during each trajectory.
+# - Test basic state prediction and long-horizon prediction error.
+# For a clean experiment, change the steady-wind vector between runs rather than changing it during a run.
+
+
+# Experiment B — Uniform, time-varying gusts
+# Goal: Test generalization to temporal disturbances.
+
+# Keep the background wind and enable the gust overlay.
+
+wind:
+  steady_wind_xyz: [2.0, 0.0, 0.0]
+  type: "none"
+  gust_enabled: true
+  gust_start_s: 3.0
+  gust_duration_s: 2.0
+  gust_amplitude_mps: 1.5
+  gust_direction: [1.0, 0.0, 0.0]
+  
+# This produces a background wind of 2 m/s along X, with an additional gust in the same direction. 
+# If the gust is added directly to the background, the peak wind speed will be 3.5 m/s.
+# Run further trials with different gust start times, durations, directions, and amplitudes. 
+# If the gust is switched on and off abruptly, it creates a discontinuity; you could add a smooth ramp if you want to model more gradual gusts.
+# Your existing gust configuration supports this experiment, assuming your implementation adds the gust independently of the selected profile.
+
+
+# Experiment C — Spatially varying wind
+# Goal: Test whether the world model generalizes when wind velocity differs across the drone's physical dimensions.
+
+wind:
+  steady_wind_xyz: [2.0, 0.0, 0.0]
+  type: "none"
+  gust_enabled: false
+
+  spatial:
+    enabled: true
+    gradient_xyz_per_m: [0.0, 0.0, 0.0]
+    reference_position_xyz: [0.0, 0.0, 1.5]
+
+
+# For a simple X-direction wind gradient, you could define:
+# \[
+# u_x(\mathbf{x})=u_{0,x}+g_x(x-x_0)
+# \]
+
+# where \(g_x\) is the change in X-direction wind velocity per metre.
+
+# For example, if \(g_x=0.5\ \mathrm{s}^{-1}\), the X-direction wind changes by 0.5 m/s for every metre of displacement along X.
+
+# Experiment D — Stronger and unseen disturbances
+# Goal: Evaluate robustness under out-of-distribution (OOD) wind.
+
+# You previously planned to train on wind speeds of 0–4 m/s and test on 4–8 m/s. Keep that distinction explicit.
+
+# Example test configuration:
+
+wind:
+  steady_wind_xyz: [6.0, 0.0, 0.0]
+  type: "none"
+  gust_enabled: false
+
+
+# The idea is to test whether assuming the same wind velocity across the entire drone is good enough for predicting its motion
+2. Step 1 — Run the zero-gradient experiment
+Your current wind configuration is:
+wind:
+  steady_wind_xyz: [2.0, 0.0, 0.0]
+  type: "none"
+  gust_enabled: false
+
+  spatial:
+    enabled: true
+    gradient_xyz_per_m: [0.0, 0.0, 0.0]
+    reference_position_xyz: [0.0, 0.0, 1.5]
+
+
+The gradient is zero, so the wind velocity is 2 m/s along the world X-axis everywhere.
+
+This is your control experiment.
+
+Run your simulation and record:
+- Drone position and velocity.
+- Drone orientation and angular velocity.
+- Wind velocity.
+- Prediction errors from your world model.
+
+
+You should also compare the center-point force model against the multiple-point force model. With zero gradient, their ambient wind inputs should agree at every sample point. Their forces might not be exactly identical if your model assigns different areas, drag coefficients, or local surface velocities.
+3. Step 2 — Increase the gradient gradually
+Suppose you define wind as:
+\[
+u_x(\mathbf{x})=2+g_x(x-x_0)
+\]
+
+Here:
+- \(2\) is the background wind speed in m/s.
+- \(x\) is the sample point's world X-coordinate in metres.
+- \(x_0\) is the reference X-coordinate.
+- \(g_x\) is the wind gradient in \(\mathrm{s}^{-1}\).
+For example, set \(g_x=0.5\ \mathrm{s}^{-1}\). At a point 0.2 m to the right of the reference position, the wind becomes 2.1 m/s. At a point 0.2 m to the left, it becomes 1.9 m/s.
+
+You can test several gradient strengths:
+Gradient \(g_x\)	Wind change per metre	Purpose
+0	0 m/s	Uniform-wind control
+0.1 s⁻¹	0.1 m/s per metre	Weak gradient
+0.5 s⁻¹	0.5 m/s per metre	Moderate gradient
+1.0 s⁻¹	1.0 m/s per metre	Stronger synthetic gradient
+
+These are illustrative test values, not measured atmospheric conditions. Keep the gradient small initially and check the resulting wind speeds over the full simulation area.

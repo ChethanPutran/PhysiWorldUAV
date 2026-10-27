@@ -1,0 +1,28 @@
+sudo docker run -it \
+  --name isaac-sim \
+  --network=host \
+  --device=nvidia.com/gpu=all \
+  --workdir=/isaac-sim \
+  --user $(id -u):$(id -g) \
+  -e HOME=/tmp \
+  -e ACCEPT_EULA=Y \
+  -e PRIVACY_CONSENT=Y \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=all \
+  -e VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json \
+  -e OMNI_SERVER=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.1 \
+  -e OMNI_KIT_ALLOW_ROOT=1 \
+  -e MESA_GL_VERSION_OVERRIDE=4.6 \
+  -e DISPLAY=:99 \
+  -v /data2/chethan/docker/isaac-sim/assets:/assets \
+  -v /data2/chethan/docker/isaac-sim/cache/computecache:/root/.nv/ComputeCache \
+  -v /data2/chethan/docker/isaac-sim/logs:/root/.nvidia-omniverse/logs \
+  -v /data2/chethan/docker/isaac-sim/cache/pip:/root/.cache/pip \
+  -v /data2/chethan/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache \
+  -v /data2/chethan/docker/isaac-sim/documents:/root/Documents \
+  -v /data2/chethan/docker/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache \
+  -v /data2/chethan/docker/isaac-sim/data:/root/.local/share/ov/data \
+  -v /data2/chethan/docker/isaac-sim/cache/ov:/root/.cache/ov \
+  -v /data2/chethan/mtech/PhysiWorldUAV:/workspace/PhysiWorldUAV \
+  -v /data2/chethan/mtech/datasets:/datasets \
+  isaac-sim-omnidrones:manual-only

@@ -1,0 +1,194 @@
+headless: false
+
+sim:
+  dt: 0.01
+  substeps: 1
+  gravity: [0, 0, -9.81]
+  replicate_physics: false
+  use_flatcache: true
+  use_gpu_pipeline: false
+  device: "cpu"
+  solver_type: 1
+  use_gpu: false
+  bounce_threshold_velocity: 0.2
+  friction_offset_threshold: 0.04
+  friction_correlation_distance: 0.025
+  enable_stabilization: true
+  gpu_max_rigid_contact_count: 524288
+  gpu_max_rigid_patch_count: 163840
+  gpu_found_lost_pairs_capacity: 4194304
+  gpu_found_lost_aggregate_pairs_capacity: 33554432
+  gpu_total_aggregate_pairs_capacity: 4194304
+  gpu_max_soft_body_contacts: 1048576
+  gpu_max_particle_contacts: 1048576
+  gpu_heap_capacity: 67108864
+  gpu_temp_buffer_capacity: 16777216
+  gpu_max_num_partitions: 8
+
+
+
+drone_model:
+  name: "Hummingbird"
+  controller: "RateController"
+
+aerodynamics:
+  air_density: 1.225
+  drag_coefficient_area_xyz: [0.08, 0.12, 0.15]
+  
+# ── Altitude hold ─────────────────────────────────────────────
+hover:
+  target_z: 1.5
+  kp_z: 3.0
+  kd_z: 2.0
+
+# ── Wind disturbance ─────────────────────────────────────────
+# General wind velocity ranges
+# Wind speed	General interpretation	Simulation use
+# 0–2 m/s	Calm to light wind	Basic hovering
+# 2–4 m/s	Light to moderate wind	Normal training disturbances
+# 4–6 m/s	Moderate wind	Robustness testing
+# 6–8 m/s	Stronger wind	OOD generalization testing
+# 8–10 m/s	Strong wind	Stress testing
+# Above 10 m/s	Very strong wind	Advanced stress tests; verify vehicle limits
+
+wind:
+  # Persistent background air velocity in world coordinates (m/s)
+  steady_wind_xyz: [2.0, 0.0, 0.0]
+
+  # Additional profile: none | constant | step | sinusoidal
+  # | gust | dryden | random
+  type: "none"
+
+  # Optional gust overlay, independent of the selected profile
+  gust_enabled: false
+  gust_start_s: 3.0
+  gust_duration_s: 2.0
+  gust_amplitude_mps: 1.5
+  gust_direction: [1.0, 0.0, 0.0]
+
+  spatial:
+    enabled: true
+
+    # "diagonal" preserves the original behavior.
+    # "matrix" enables cross-axis gradients.
+    gradient_mode: "matrix"
+
+    # Used when gradient_mode == "diagonal"
+    gradient_xyz_per_m: [0.5, 0.0, 0.0]
+
+    # Used when gradient_mode == "matrix"
+    # Rows = wind velocity components [u_x, u_y, u_z]
+    # Columns = position coordinates [x, y, z]
+    gradient_matrix_per_m:
+      - [0.5, 0.0, 0.0]
+      - [0.2, 0.3, 0.0]
+      - [0.0, 0.1, 0.0]
+
+    reference_position_xyz: [0.0, 0.0, 1.5]
+    
+  constant:
+    magnitude: 1.0
+    direction: [0.0, 1.0, 0.0]
+
+  step:
+    magnitude: 2.0
+    direction: [0.0, 1.0, 0.0]
+    step_time: 5.0
+
+  sinusoidal:
+    amplitude: 1.0
+    direction: [0.0, 1.0, 0.0]
+    frequency_hz: 0.2
+    offset: 0.0
+    phase_rad: 0.0
+
+  gust:
+    magnitude: 2.0
+    direction: [0.0, 1.0, 0.0]
+    start_time: 3.0
+    duration: 1.0
+
+  dryden:
+    sigma: 0.3
+    tau_seconds: 1.0
+
+  random:
+    sigma: 0.5
+
+visualization:
+  wind_field:
+    enabled: true
+
+    # Grid density: distance between adjacent arrows, in metres
+    spacing_m: 0.25 # Reducing spacing to 0.25 m makes the visualization denser; increasing it to 1.0 m makes it sparser.
+
+    # Extent around the drone in world X and Y
+    radius_xy_m: 2.0
+
+    # Vertical planes to visualize relative to drone altitude
+    z_offsets_m: [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
+
+    # Visual arrow length = velocity magnitude * scale
+    velocity_arrow_scale: 0.1
+
+    # Maximum arrows to draw in one update
+    max_arrows: 5000
+
+    # Refresh every N simulation steps
+    update_every_n_steps: 5
+
+    # Display options
+    show_velocity: true
+    show_drag_force: true
+
+# ── Data collection ──────────────────────────────────────────
+collection:
+  num_trajectories: 1
+  steps_per_trajectory: 1000
+  output_dir: "/datasets/wind_experiments"
+
+trajectories:
+  hover:
+    num_trajectories: 10
+    steps_per_trajectory: 500
+    output_dir: "/datasets/wind_experiments"
+    pair_id: 0
+  
+
+configuration:
+  hover:
+    time_range: [0, 5]
+    wind_magnitude_range: [0, 0]
+  
+
+controller:
+  position:
+    kp_position_xy: 4.0
+    kp_velocity_xy: 2.0
+    max_velocity_xy: 3.0       # m/s
+    max_acceleration_xy: 5.66  # m/s^2
+
+  attitude:
+    gain: 6.0
+    max_tilt_deg: 30.0
+    max_rate: 3.0              # rad/s
+
+  altitude:
+    kp_position_z: 6.0
+    kp_velocity_z: 3.0
+    max_velocity_z: 2.0        # m/s
+    max_acceleration_z: 4.0    # m/s^2
+
+
+control_mode: "controlled"  # controlled | fixed_input
+
+# ── Experiment ───────────────────────────────────────────────
+experiment:
+  name: "wind_hover_collection"
+  seed: 42
+
+
+# ── Camera ───────────────────────────────────────────────────
+camera:
+  enabled: false
+  resolution: [640, 480]

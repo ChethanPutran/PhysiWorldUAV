@@ -1,0 +1,2921 @@
+# ================================================================
+# config/dataset_generation.yaml
+# World-model dataset generation — 6 flight modes × multiple winds
+# ================================================================
+#
+# Usage examples:
+#
+#   # Training set (default)
+#   python generate_dataset.py
+#
+#   # Validation set (different seed, same distribution)
+#   python generate_dataset.py experiment.seed=99 \
+#       experiment.output_dir=/datasets/world_model_v1_val
+#
+#   # OOD magnitude extrapolation (2× wind)
+#   python generate_dataset.py ood.wind_scale=2.0 \
+#       experiment.output_dir=/datasets/ood_magnitude
+#
+#   # OOD directional extrapolation (vertical only)
+#   python generate_dataset.py ood.wind_directions_override='[[0,0,1],[0,0,-1]]' \
+#       experiment.output_dir=/datasets/ood_directional
+#
+#   # OOD temporal extrapolation (2× faster sinusoidal)
+#   python generate_dataset.py ood.temporal_speed_scale=2.0 \
+#       experiment.output_dir=/datasets/ood_temporal
+#
+#   # OOD physics mismatch (mass +15%, inertia +10%)
+#   python generate_dataset.py ood.mass_scale=1.15 ood.inertia_scale=1.10 \
+#       experiment.output_dir=/datasets/ood_physics
+#
+# ================================================================
+
+defaults:
+  - _self_
+
+# ─── Experiment metadata ────────────────────────────────────────
+experiment:
+  name: "world_model_dataset_v1"
+  seed: 42
+  output_dir: "/datasets/world_model_v1"
+  save_metadata: true       # write .json alongside each .npz
+  verbose: true             # print per-second status lines
+  log_frequency: 1.0          # seconds between status lines
+
+# ─── Simulation (matches working manual_flight config) ──────────
+sim:
+  dt: 0.01
+  stage_units_in_meters: 1.0
+  backend: "torch"
+  substeps: 1
+  gravity: [0, 0, -9.81]
+  replicate_physics: false
+  use_flatcache: true
+  use_gpu_pipeline: false
+  device: "cpu"
+  solver_type: 1
+  use_gpu: false
+  bounce_threshold_velocity: 0.2
+  friction_offset_threshold: 0.04
+  friction_correlation_distance: 0.025
+  enable_stabilization: true
+  gpu_max_rigid_contact_count: 524288
+  gpu_max_rigid_patch_count: 163840
+  gpu_found_lost_pairs_capacity: 4194304
+  gpu_found_lost_aggregate_pairs_capacity: 33554432
+  gpu_total_aggregate_pairs_capacity: 4194304
+  gpu_max_soft_body_contacts: 1048576
+  gpu_max_particle_contacts: 1048576
+  gpu_heap_capacity: 67108864
+  gpu_temp_buffer_capacity: 16777216
+  gpu_max_num_partitions: 8
+
+# ─── Drone model ────────────────────────────────────────────────
+drone_model:
+  name: "Hummingbird"
+  controller: "RateController"
+
+# ─── Camera (off during dataset generation for speed) ──────────
+camera:
+  enabled: false
+  resolution: [640, 480]
+  position: [0.2, 0.0, 0.1]
+
+# ─── High-level controller gains ────────────────────────────────
+# All modes (hover, line, circle, figure_eight, helix, waypoint_random,
+# attitude_*, yaw_*) are position/attitude trackers built on top of the
+# low-level RateController. These gains govern the outer loop.
+rate_controller_gains:
+  kp_pos_xy: 1.5              # [rad/s per m]  P on horizontal position error
+  kd_pos_xy: 0.8              # [rad/s per m/s] D on horizontal velocity
+  kp_pos_z:  3.0              # [m/s² per m]   P on altitude error
+  kd_pos_z:  2.0              # [m/s² per m/s] D on vertical velocity
+  kp_yaw:    1.0              # [rad/s per rad] P on yaw error
+  max_tilt_rad: 0.5           # ~29° — safety clamp
+  max_rate_radps: 2.0         # safety clamp on body rates
+
+# ─── OOD modifiers (1.0 = training distribution) ────────────────
+# Override these via Hydra CLI to generate OOD test sets.
+ood:
+  wind_scale: 1.0                     # multiplies all wind magnitudes
+  wind_directions_override: null      # null → use per-segment defaults
+                                      # e.g. [[0,0,1]] for vertical-only
+  mass_scale: 1.0                     # physics OOD
+  inertia_scale: 1.0
+  drag_scale: 1.0
+  temporal_speed_scale: 1.0           # >1 = faster sinusoidal = temporal OOD
+
+# ─── Dataset composition ────────────────────────────────────────
+dataset:
+  total_trajectories: 100
+  train_val_split: 0.8                # first 80% train, last 20% val
+  action_seed_offset: 100000          # RNG offset for action sampling
+
+  # ── Counterfactual pairs ─────────────────────────────────────
+  # For each scripted (non-random) trajectory in the listed modes:
+  #   1. Run with wind = multiplier[0] × F_w, record all actions
+  #   2. Replay the SAME actions with wind = multiplier[i] × F_w
+  # Both runs share a pair_id; each stores its own (s, u, F_w) triple.
+  # This breaks the action-wind correlation and defeats Problem 2.
+  counterfactual:
+    enabled: true
+    modes: [translation, acceleration, yaw, attitude, combined]
+    wind_multipliers: [1.0, 2.0, 3.0]      # variant 0 = nominal, variant 1 = 2× wind, variant 2 = 3× wind
+    replay_mode: "replay_recorded_actions"  # bypass controller, apply recorded u_t
+
+  # ── Mode fractions (must sum to 1.0) ─────────────────────────
+  modes:
+
+    # ==========================================================
+    # MODE 1: HOVER (10%) The drone tries to maintain a fixed position, but 
+    # small disturbances can cause motion and attitude corrections
+    # Weakest supervision — included only so hover predictions
+    # don't diverge under OOD. Not used for OOD validation.
+    # ==========================================================
+    # ==========================================================
+    # MODE 1: HOVER (10%) — scenario-based disturbance-recovery
+    # ==========================================================
+    # Weakest supervision for d_θ — wind is largely absorbed by the
+    # controller (Problem 1). Included ONLY so the world model does
+    # not learn degenerate behaviour on near-equilibrium states
+    # during multi-step rollouts under OOD evaluation.
+    #
+    # NOT eligible for OOD test sets. Hover trajectories lack the
+    # identifiability property required to validate d_θ; any
+    # "generalisation" claim based on hover-only data would be
+    # unfounded. Hover data exists to stabilise, not to validate.
+    #
+    # Every scenario exercises a distinct combination of:
+    #   - scenario type           (calm / constant / gust / rotating /
+    #                              sinusoidal / dryden / step-up /
+    #                              step-down / initial-tilt / physics-perturbed)
+    #   - hover altitude          (0.5 / 1.0 / 1.5 / 2.5 m)
+    #   - initial attitude        (level / tilted roll / tilted pitch / diagonal)
+    #   - initial velocity        (zero / small residual)
+    #   - wind type               (none / constant / gust / rotating /
+    #                              sinusoidal / dryden / step)
+    #   - wind direction          (head / tail / cross / diagonal / vertical)
+    #   - disturbance timing      (mid-flight / startup / continuous)
+    #   - physics perturbation    (nominal / mass + inertia + drag scaled)
+    #   - initial angular ω       (zero / non-zero from tilt scenario)
+    #
+    # Trajectory count: 10 (10% of 100). With guarantee_coverage,
+    # every scenario appears exactly once. counterfactual=false:
+    # hover is degenerate for causal pairing — the controller zeroes
+    # the residual, so pairing different wind magnitudes yields
+    # near-identical states. Not useful for causal supervision.
+    # ==========================================================
+    hover:
+      fraction: 0.10
+      definition:
+        # ── Trajectory length ─────────────────────────────────
+        # Sampled per trajectory; short/medium/long coverage.
+        duration_range_s: [10.0, 20.0]
+
+        # ── Hover altitude ────────────────────────────────────
+        # One sampled uniformly per trajectory.
+        altitudes_m: [0.5, 1.0, 1.5, 2.5]
+
+
+        # ── Initial conditions ────────────────────────────────
+        # Applied before sim.play(), after drone.spawn() and before
+        # drone.initialize(). Overrides spawn defaults.
+        # Scenario-level `initial_conditions` (if present) override
+        # these mode-level defaults.
+        initial_conditions:
+          position_xy_range_m: [-2.0, 2.0]       # uniform per axis
+          position_z_offset_m: [-0.15, 0.15]     # relative to sampled altitude
+          velocity_magnitude_range_mps: [0.0, 0.0]  # zero by default
+          velocity_direction: random_uniform     # unit sphere, random
+          roll_offset_deg: 0.0                   # level by default
+          pitch_offset_deg: 0.0
+          yaw_range_rad: [-3.14159, 3.14159]     # full circle
+
+        # ── Sensor noise ──────────────────────────────────────
+        # Applied POST-HOC to logged IMU data, NOT during simulation.
+        # Rationale: injecting noise into the simulator would feed it
+        # back to the controller, changing behaviour. Post-hoc
+        # application yields the same clean flight recorded once,
+        # with noisy variants generated offline during training-time
+        # augmentation.
+        sensor_noise:
+          apply_during_sim: false
+          imu_accel_std_mps2: 0.02
+          imu_gyro_std_radps: 0.005
+          imu_accel_bias_mps2: [0.0, 0.0, 0.0]    # fixed per trajectory, sampled from
+                                                  #   range below if desired
+          imu_gyro_bias_radps: [0.0, 0.0, 0.0]
+          noise_seed_offset: 200000               # distinct from action/IC RNG stream
+
+        # ── Wind direction vocabulary ─────────────────────────
+        # `direction: from_list` in any scenario samples one of these
+        # uniformly. Individual scenarios can pin a specific direction.
+        directions:
+          headwind:        [ 1.0,  0.0, 0.0]
+          tailwind:        [-1.0,  0.0, 0.0]
+          crosswind_right: [ 0.0,  1.0, 0.0]
+          crosswind_left:  [ 0.0, -1.0, 0.0]
+          diagonal_ne:     [ 0.7071,  0.7071, 0.0]
+          diagonal_nw:     [-0.7071,  0.7071, 0.0]
+          diagonal_se:     [ 0.7071, -0.7071, 0.0]
+          diagonal_sw:     [-0.7071, -0.7071, 0.0]
+          updraft:         [ 0.0, 0.0,  1.0]
+          downdraft:       [ 0.0, 0.0, -1.0]
+
+
+        # ── Scenario templates ────────────────────────────────
+        # One sampled per trajectory (with coverage guarantee below).
+        # Each phase has a fixed `duration_s` and a `wind` spec.
+        # Trajectory length = sum of phase durations. If this sum
+        # differs from a sampled `duration_range_s`, scale phase
+        # durations proportionally so total = sampled value.
+        scenarios:
+          # ─────────────────────────────────────────────────
+          # S1: Calm hover (baseline)
+          # ─────────────────────────────────────────────────
+          - name: calm_hover
+            weight: 0.15
+            initial_conditions:
+              velocity_magnitude_range_mps: [0.0, 0.0]
+              roll_offset_deg: 0.0
+              pitch_offset_deg: 0.0
+            phases:
+              - duration_s: 12.0
+                wind: {type: none}
+
+          # ─────────────────────────────────────────────────
+          # S2: Light constant wind, steady compensation
+          # ─────────────────────────────────────────────────
+          - name: constant_wind_steady
+            weight: 0.10
+            phases:
+              - duration_s: 3.0
+                wind: {type: none}
+              - duration_s: 12.0
+                wind:
+                  type: constant
+                  magnitude_N: [1.0, 3.0]         # sampled
+                  direction: from_list
+
+          # ─────────────────────────────────────────────────
+          # S3: Sudden lateral gust with recovery
+          # Controller must reject the impulse and return to hover.
+          # ─────────────────────────────────────────────────
+          - name: lateral_gust_recovery
+            weight: 0.10
+            phases:
+              - duration_s: 4.0
+                wind: {type: none}
+              - duration_s: 0.5
+                wind:
+                  type: constant
+                  magnitude_N: [4.0, 7.0]         # strong gust
+                  direction: [0.0, 1.0, 0.0]      # pure lateral
+              - duration_s: 10.0
+                wind: {type: none}                # observe recovery
+
+          # ─────────────────────────────────────────────────
+          # S4: Wind direction rotation
+          # Forces Rᵀ F_w learning within hover, not just in yaw mode.
+          # ─────────────────────────────────────────────────
+          - name: wind_direction_rotation
+            weight: 0.10
+            phases:
+              - duration_s: 3.0
+                wind: {type: none}
+              - duration_s: 12.0
+                wind:
+                  type: rotating
+                  magnitude_N: [1.0, 3.0]
+                  rotation_rate_radps: [0.3, 0.8]  # sampled
+                  initial_direction_rad: 0.0
+
+          # ─────────────────────────────────────────────────
+          # S5: Sinusoidal wind (time-varying load)
+          # ─────────────────────────────────────────────────
+          - name: sinusoidal_wind
+            weight: 0.10
+            phases:
+              - duration_s: 3.0
+                wind: {type: none}
+              - duration_s: 12.0
+                wind:
+                  type: sinusoidal
+                  amplitude_N: [1.5, 3.5]
+                  frequency_hz: [0.05, 0.30]      # sampled
+                  direction: from_list
+
+          # ─────────────────────────────────────────────────
+          # S6: Dryden turbulence
+          # ─────────────────────────────────────────────────
+          - name: dryden_turbulence
+            weight: 0.10
+            phases:
+              - duration_s: 15.0
+                wind:
+                  type: dryden
+                  sigma: [0.3, 1.0]               # sampled
+                  length_scale_m: 100.0
+
+          # ─────────────────────────────────────────────────
+          # S7: Wind step up (disturbance appears mid-flight)
+          # ─────────────────────────────────────────────────
+          - name: wind_step_up
+            weight: 0.10
+            phases:
+              - duration_s: 3.0
+                wind: {type: none}
+              - duration_s: 12.0
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 5.0]
+                  direction: from_list
+
+          # ─────────────────────────────────────────────────
+          # S8: Wind step down (relaxation transient)
+          # ─────────────────────────────────────────────────
+          - name: wind_step_down
+            weight: 0.05
+            phases:
+              - duration_s: 6.0
+                wind:
+                  type: constant
+                  magnitude_N: [3.0, 5.0]
+                  direction: from_list
+              - duration_s: 9.0
+                wind: {type: none}                # observe drift-back
+
+          # ─────────────────────────────────────────────────
+          # S9: Initial attitude disturbance
+          # Start tilted; the controller must recover level flight.
+          # ─────────────────────────────────────────────────
+          - name: initial_attitude_disturbance
+            weight: 0.10
+            initial_conditions:
+              roll_offset_deg: [10.0, 20.0]       # sampled
+              pitch_offset_deg: [10.0, 20.0]      # sampled (one or both nonzero)
+              velocity_magnitude_range_mps: [0.0, 0.0]
+            phases:
+              - duration_s: 12.0
+                wind: {type: none}
+
+          # ─────────────────────────────────────────────────
+          # S10: Physics perturbation + wind
+          # Mass/inertia/drag scaled; wind active.
+          # ─────────────────────────────────────────────────
+          - name: physics_perturbed_with_wind
+            weight: 0.10
+            physics_modifiers:
+              mass_scale: [0.90, 1.15]
+              inertia_scale: [0.90, 1.15]
+              drag_scale: [0.80, 1.30]
+            phases:
+              - duration_s: 3.0
+                wind: {type: none}
+              - duration_s: 12.0
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction: from_list
+
+
+        # ── Sampling policy ───────────────────────────────────
+        sampling:
+          guarantee_coverage: true
+          # When true, sample each scenario at least once before
+          # sampling by weight. With 10 hover trajectories and 10
+          # scenarios, each scenario appears exactly once.
+          #
+          # When false, sample purely by weight — some scenarios may
+          # be absent from small datasets, which is fine if the total
+          # hover fraction is raised (e.g. 15% → 15 trajectories).
+
+
+        # ── Expected composition ──────────────────────────────
+        report:
+          trajectory_count: 10
+          scenarios_present: 10                   # one per scenario when
+                                                  # guarantee_coverage=true
+          avg_duration_s: 13.0
+          total_steps: 13000                      # ~13 s × 100 Hz × 10
+          disturbance_recovery_segments: 5        # S3, S4, S5, S7, S8
+          physics_perturbation_segments: 1        # S9 (mass/inertia/drag)
+          attitude_disturbance_segments: 1        # S9 (initial attitude)
+          gust_segments: 1                        # S3
+
+        # Note: hover trajectories are NOT used to define OOD test sets
+        # (they lack the identifiability property required for validating
+        # d_θ). They exist purely so the world model does not learn
+        # degenerate behaviour on near-equilibrium states during
+        # multi-step rollouts under OOD evaluation.
+      counterfactual: false
+
+    # ==========================================================
+    # MODE 2: TRANSLATION (27.5%)  — the workhorse
+    # Residual grows with (v − v_wind)² → clean identifiability.
+    # ==========================================================
+    # ==========================================================
+    # MODE 2: TRANSLATION (27.5%)  — the workhorse
+    # ==========================================================
+    # Residual grows with (v − v_wind)² → clean identifiability.
+    # Same wind produces different residuals at different speeds,
+    # so the model is forced to use the IMU to explain the state
+    # trajectory — this is the primary data that defeats
+    # Problem 1 (residual absorption) and Problem 2 (action-wind
+    # shortcut) in the world-model training pipeline.
+    #
+    # Eligible for OOD test sets. Includes counterfactual replay
+    # (mode-level counterfactual: true) — every scripted segment is
+    # replayed under different wind magnitudes so the training loop
+    # can enforce the "same (s_t, u_t), different F_w, different
+    # s_{t+1}" causal pairing that forces d_θ to learn from the
+    # encoder rather than the action shortcut.
+    #
+    # Every scenario exercises a distinct combination of:
+    #   - direction               (forward / backward / sideways /
+    #                              diagonal / 3D with climb)
+    #   - distance                (short 2 m / medium 4 m / long 8 m)
+    #   - velocity                (slow 0.3 m/s / moderate 1.0 /
+    #                              fast 2.5 m/s)
+    #   - acceleration profile    (gradual / moderate / aggressive / piecewise)
+    #   - trajectory shape        (line / circle / figure-eight /
+    #                              waypoint sequence / random actions)
+    #   - altitude                (constant / changing via z-change ramp)
+    #   - initial velocity        (stationary / residual)
+    #   - wind type               (constant / step / multi-step /
+    #                              sinusoidal / rotating / gust)
+    #   - wind direction relative (head / tail / cross / diagonal)
+    #       to motion
+    #
+    # Trajectory count: 28 (27.5% of 100). With guarantee_coverage,
+    # each of the 10 scenario templates is sampled 2–3 times so
+    # per-scenario statistical variance is preserved while still
+    # averaging over the trajectory-level randomness (velocity,
+    # distance, wind direction, initial conditions).
+    #
+    # Coverage of user's required scenarios:
+    #   forward_with_headwind:      S1  (forward, opposing wind)
+    #   sideways_with_crosswind:    S3  (lateral, perpendicular wind)
+    #   diagonal_changing_wind:     S4  (diagonal, rotating wind)
+    #   residual_velocity_start:    S5  (starts already moving)
+    #   target_change_while_moving: S6  (multi-waypoint mid-flight)
+    #   supplemental:               S2  (backward_tailwind)
+    #                               S7  (aggressive_acceleration)
+    #                               S8  (slow_gradual_sinusoidal)
+    #                               S9  (translation_with_climb)
+    #                               S10 (random_actions_multi_step)
+    #                                    ← decorrelation workhorse
+    # ==========================================================
+
+    translation:
+      fraction: 0.275
+      definition:
+        # ── Mode-level defaults (can be overridden per scenario) ─
+        duration_range_s: [15.0, 30.0]
+        duration_s: 100.0
+        altitudes: [1.0, 1.5, 2.0]
+        altitude_ramp: [1.0, 2.0]          # ramp over the trajectory
+        altitudes_m: [1.0, 1.5, 2.0]       # sampled per trajectory
+        altitude_ramp_m: [-0.5, +1.0]      # applied over the trajectory
+                                           # unless scenario specifies z_change
+        initial_conditions:
+          position_xy_range_m: [-3.0, 3.0]     # random start xy
+          position_z_offset_m: [-0.1, 0.1]
+          velocity_magnitude_range_mps: [0.0, 0.0]  # stationary default
+          velocity_direction: random_uniform
+          roll_offset_deg: 0.0
+          pitch_offset_deg: 0.0
+          yaw_range_rad: [-3.14159, 3.14159]
+    
+        # ── Wind direction vocabulary ────────────────────────
+        # `direction: from_list` samples one of these uniformly.
+        directions:
+          north:   [ 1.0,  0.0, 0.0]
+          south:   [-1.0,  0.0, 0.0]
+          east:    [ 0.0,  1.0, 0.0]
+          west:    [ 0.0, -1.0, 0.0]
+          ne:      [ 0.7071,  0.7071, 0.0]
+          nw:      [-0.7071,  0.7071, 0.0]
+          se:      [ 0.7071, -0.7071, 0.0]
+          sw:      [-0.7071, -0.7071, 0.0]
+          up:      [ 0.0, 0.0,  1.0]
+          down:    [ 0.0, 0.0, -1.0]
+
+        # ── Acceleration profile vocabulary ──────────────────
+        # Controls how fast the target velocity is reached at the
+        # start of a `line` segment.
+        #   gradual    → 1.5 s ramp
+        #   moderate   → 0.8 s ramp
+        #   aggressive → 0.3 s ramp
+        #   piecewise  → step ramps (0.2 s up, 0.5 s hold, 0.2 s down)
+        acceleration_profiles:
+          gradual: 1.5
+          moderate: 0.8
+          aggressive: 0.3
+          piecewise: {up_s: 0.2, hold_s: 0.5, down_s: 0.2}
+
+
+            segments:
+              # (a) Straight-line +X with crosswind
+              - t_range: [0.0, 10.0]
+                controller:
+                  type: line
+                  velocity_mps: [1.0, 0.0, 0.0]
+                wind: {type: constant, magnitude_N: 2.0, direction: [0, 1, 0]}
+
+              # (b) Straight-line +Y with crosswind
+              - t_range: [10.0, 20.0]
+                controller:
+                  type: line
+                  velocity_mps: [0.0, 1.0, 0.0]
+                wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+              # Straight-line +X with headwind
+              - t_range: [20.0, 30.0]
+                controller:
+                  type: line
+                  velocity_mps: [1.0, 0.0, 0.0]
+                wind: {type: constant, magnitude_N: 2.0, direction: [-1, 0, 0]}
+                
+              # Straight-line +X with tailwind
+              - t_range: [30.0, 40.0]
+                controller:
+                  type: line
+                  velocity_mps: [1.0, 0.0, 0.0]
+                wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+              - t_range: [20.0, 30.0]
+                controller:
+                  type: line
+                  velocity_mps: [1.0, 0.0, 0.0]
+                wind: {type: constant, magnitude_N: 2.0, direction: [-1, 0, 0]}
+
+              # (c) Circle (r = 2 m), yaw tracks tangent
+              - t_range: [20.0, 30.0]
+                controller:
+                  type: circle
+                  radius_m: 2.0
+                  omega_radps: 0.3
+                  yaw_follows_tangent: true
+                  center_xy: [0.0, 0.0]
+                wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+              # (d) Figure-eight with wind step
+              - t_range: [30.0, 40.0]
+                controller:
+                  type: figure_eight
+                  amplitude_m: [2.0, 1.0]
+                  frequency_hz: 0.1
+                  yaw_follows_tangent: false
+                wind:
+                  type: step
+                  step_time_s: 35.0
+                  from_magnitude_N: 2.0
+                  to_magnitude_N: 6.0
+                  direction: [1, 0, 0]
+
+              # (e) Random actions, constant wind — defeats action-wind shortcut
+              - t_range: [40.0, 70.0]
+                controller:
+                  type: random_action
+                  thrust_range_N: [4.0, 9.0]
+                  rate_range_radps: [-0.6, 0.6]
+                  resample_interval_s: 0.3
+                wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+              # (f) Random actions with 10s wind steps
+              - t_range: [70.0, 100.0]
+                controller:
+                  type: random_action
+                  thrust_range_N: [4.0, 9.0]
+                  rate_range_radps: [-0.6, 0.6]
+                  resample_interval_s: 0.3
+                wind:
+                  type: multi_step
+                  direction: [1, 0, 0]
+                  steps:
+                    - {t_s: 70.0, magnitude_N: 0.0}
+                    - {t_s: 80.0, magnitude_N: 2.0}
+                    - {t_s: 90.0, magnitude_N: 4.0}
+                    - {t_s: 100.0, magnitude_N: 6.0}
+            counterfactual: true
+        # ── Scenario templates ───────────────────────────────
+        scenarios:
+
+          # ─────────────────────────────────────────────────
+          # S1: Forward with headwind  [IMPORTANT — user list #1]
+          # ─────────────────────────────────────────────────
+          - name: forward_headwind
+            weight: 0.12
+            initial_conditions:
+              velocity_magnitude_range_mps: [0.0, 0.0]
+            phases:
+              - duration_s: [18.0, 25.0]
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  distance_range_m: [3.0, 8.0]
+                  velocity_range_mps: [0.5, 2.0]
+                  acceleration_profile: gradual
+                  altitude_m: null                   # use sampled mode-level
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction: [-1, 0, 0]              # headwind
+
+          # ─────────────────────────────────────────────────
+          # S2: Backward with tailwind
+          # ─────────────────────────────────────────────────
+          - name: backward_tailwind
+            weight: 0.08
+            initial_conditions:
+              velocity_magnitude_range_mps: [0.0, 0.0]
+            phases:
+              - duration_s: [15.0, 22.0]
+                controller:
+                  type: line
+                  direction: [-1, 0, 0]
+                  distance_range_m: [3.0, 6.0]
+                  velocity_range_mps: [0.5, 1.5]
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction: [1, 0, 0]               # pushes with motion
+
+          # ─────────────────────────────────────────────────
+          # S3: Sideways with crosswind  [IMPORTANT — user list #2]
+          # ─────────────────────────────────────────────────
+          - name: sideways_crosswind
+            weight: 0.12
+            phases:
+              - duration_s: [15.0, 22.0]
+                controller:
+                  type: line
+                  direction_from_list: [east, west]  # +Y or −Y
+                  distance_range_m: [2.0, 5.0]
+                  velocity_range_mps: [0.5, 1.5]
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 4.0]
+                  direction_from_list: [north, south] # perpendicular
+
+          # ─────────────────────────────────────────────────
+          # S4: Diagonal with rotating wind  [IMPORTANT — user list #3]
+          # ─────────────────────────────────────────────────
+          - name: diagonal_rotating_wind
+            weight: 0.10
+            phases:
+              - duration_s: [18.0, 25.0]
+                controller:
+                  type: line
+                  direction_from_list: [ne, nw, se, sw]
+                  distance_range_m: [3.0, 7.0]
+                  velocity_range_mps: [0.5, 1.5]
+                  acceleration_profile: gradual
+                wind:
+                  type: rotating
+                  magnitude_N: [1.5, 3.0]
+                  rotation_rate_radps: [0.2, 0.5]
+                  initial_direction_rad: [0.0, 1.5708]  # 0 or π/2 start
+
+          # ─────────────────────────────────────────────────
+          # S5: Residual velocity start  [IMPORTANT — user list #4]
+          # Drone begins already moving; controller doesn't need
+          # an acceleration ramp. Tests transient elimination.
+          # ─────────────────────────────────────────────────
+          - name: residual_velocity_start
+            weight: 0.08
+            initial_conditions:
+              velocity_magnitude_range_mps: [0.4, 1.2]
+              velocity_direction: random_uniform
+            phases:
+              - duration_s: [12.0, 18.0]
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  distance_range_m: [3.0, 6.0]
+                  velocity_range_mps: [0.5, 1.5]
+                  acceleration_profile: gradual
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [east, west]
+
+          # ─────────────────────────────────────────────────
+          # S6: Multi-waypoint with mid-flight wind change  [IMPORTANT — user list #5]
+          # Tests target change while moving + wind disturbance
+          # ─────────────────────────────────────────────────
+          - name: multi_waypoint_wind_change
+            weight: 0.12
+            phases:
+              - duration_s: [22.0, 30.0]
+                controller:
+                  type: waypoint_sequence
+                  velocity_range_mps: [0.6, 1.2]
+                  acceleration_profile: moderate
+                  waypoints:                          # relative to start
+                    - {xy: [2.0, 0.0], z_offset_m:  0.0, duration_s: 5.0}
+                    - {xy: [2.0, 2.0], z_offset_m:  0.0, duration_s: 5.0}
+                    - {xy: [0.0, 2.0], z_offset_m: -0.2, duration_s: 5.0}
+                    - {xy: [0.0, 0.0], z_offset_m:  0.0, duration_s: 5.0}
+                wind:
+                  type: multi_step
+                  direction_from_list: [north, east]
+                  steps:
+                    - {t_s:  0.0, magnitude_N: 2.0}
+                    - {t_s: 10.0, magnitude_N: 4.0}
+                    - {t_s: 15.0, magnitude_N: 1.0}
+
+          # ─────────────────────────────────────────────────
+          # S7: Aggressive acceleration (short distance, fast ramp)
+          # ─────────────────────────────────────────────────
+          - name: aggressive_acceleration
+            weight: 0.08
+            phases:
+              - duration_s: [10.0, 15.0]
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  distance_range_m: [4.0, 8.0]
+                  velocity_range_mps: [1.5, 2.5]
+                  acceleration_profile: aggressive
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction: [-1, 0, 0]              # headwind during ramp
+
+          # ─────────────────────────────────────────────────
+          # S8: Slow, gradual translation + sinusoidal wind
+          # Captures the "gentle flight under time-varying load"
+          # regime — closer to the OOD temporal extrapolation test.
+          # ─────────────────────────────────────────────────
+          - name: slow_gradual_sinusoidal
+            weight: 0.08
+            phases:
+              - duration_s: [22.0, 30.0]
+                controller:
+                  type: line
+                  direction_from_list: [east, west]
+                  distance_range_m: [2.0, 4.0]
+                  velocity_range_mps: [0.3, 0.8]
+                  acceleration_profile: gradual
+                wind:
+                  type: sinusoidal
+                  amplitude_N: [1.5, 3.0]
+                  frequency_hz: [0.05, 0.15]
+                  direction: [1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S9: 3D translation with altitude change
+          # Translates horizontally while climbing or descending.
+          # ─────────────────────────────────────────────────
+          - name: translation_with_climb
+            weight: 0.08
+            phases:
+              - duration_s: [18.0, 25.0]
+                controller:
+                  type: line
+                  direction_from_list: [north, east, ne]
+                  distance_range_m: [3.0, 6.0]
+                  z_change_m: [0.5, 1.5]              # sign sampled
+                  velocity_range_mps: [0.5, 1.0]
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [east, west]  # perpendicular to climb
+
+          # ─────────────────────────────────────────────────
+          # S10: Random actions with multi-step wind (decorrelation workhorse)
+          # This is the segment that most effectively breaks the
+          # action-wind correlation (Problem 2).
+          # ─────────────────────────────────────────────────
+          - name: random_actions_multi_step
+            weight: 0.14
+            phases:
+              - duration_s: [30.0, 40.0]
+                controller:
+                  type: random_action
+                  thrust_range_N: [4.0, 9.0]
+                  rate_range_radps: [-0.6, 0.6]
+                  resample_interval_s: 0.3
+                wind:
+                  type: multi_step
+                  direction_from_list: [north, east, ne]
+                  steps:
+                    - {t_s:  0.0, magnitude_N: 0.0}
+                    - {t_s: 10.0, magnitude_N: 2.0}
+                    - {t_s: 20.0, magnitude_N: 4.0}
+                    - {t_s: 30.0, magnitude_N: 6.0}
+
+        # ── Sampling policy ──────────────────────────────────
+        sampling:
+          guarantee_coverage: true
+          # 28 translation trajectories across 10 scenarios with
+          # coverage guarantee → each scenario sampled 2–3 times.
+          # Every important scenario from the user's list appears.
+
+        # ── Expected composition ─────────────────────────────
+        report:
+          trajectory_count: 28
+          scenarios_present: 10
+          avg_duration_s: 22.0
+          total_steps: ~61600                 # 22 s × 100 Hz × 28
+          # per-scenario average samples
+          per_scenario_min: 2
+          per_scenario_max: 3
+
+          # Coverage matrix vs user's "important scenarios" list
+          coverage:
+            forward_with_headwind:      S1
+            sideways_with_crosswind:    S3
+            diagonal_changing_wind:     S4
+            residual_velocity_start:    S5
+            target_change_while_moving: S6
+            # supplemental coverage
+            backward_tailwind:          S2
+            aggressive_acceleration:    S7
+            slow_gradual_sinusoidal:    S8
+            three_d_translation:        S9
+            random_decorrelation:       S10
+
+        # Note: translation trajectories ARE eligible for the OOD test
+        # sets (unlike hover). The counterfactual replay (see mode-level
+        # `counterfactual: true`) doubles the scripted scenarios into
+        # counterfactual pairs, which is what enables the world model
+        # to validate d_θ on OOD magnitude.
+
+      counterfactual: true
+
+
+
+    # ==========================================================
+    # MODE 3: ACCELERATION / DECELERATION (17.5%)
+    # Residual = F_w/m directly — cleanest physical signal.
+    # ==========================================================
+    # ==========================================================
+    # MODE 3: ACCELERATION / DECELERATION (17.5%)
+    # ==========================================================
+    # Residual = F_w/m directly — cleanest physical signal.
+    #
+    # Every scenario exercises a distinct combination of:
+    #   - acceleration magnitude  (gentle / moderate / aggressive)
+    #   - direction               (fwd / back / lateral / diagonal / 3D)
+    #   - initial velocity        (zero / residual)
+    #   - target velocity         (slow / moderate / fast)
+    #   - acceleration duration   (short / medium / long)
+    #   - initial angular velocity (zero / perturbed)
+    #   - wind                    (opposing / assisting / crosswind / gust)
+    #   - attitude transient      (implicit in every ramp)
+    #
+    # Trajectory count: 18 (17.5% of 100). With guarantee_coverage,
+    # every scenario appears at least once, with the paired
+    # comparison sampled as a matched pair.
+    # ==========================================================
+    acceleration:
+      fraction: 0.175
+      definition:
+        duration_s: 100.0
+        altitudes: [1.5, 2.0, 3.0]         # headroom for ramps
+        duration_range_s: [12.0, 20.0]
+        altitudes_m: [1.5, 2.0, 2.5, 3.0]     # headroom for vertical maneuvers
+        # ── Initial conditions ─────────────────────────────────
+        initial_conditions:
+          position_xy_range_m: [-3.0, 3.0]
+          position_z_offset_m: [-0.1, 0.1]
+          velocity_magnitude_range_mps: [0.0, 0.0]
+          velocity_direction: random_unit_vector
+          roll_offset_deg: 0.0
+          pitch_offset_deg: 0.0
+          yaw_range_rad: [-3.14159, 3.14159]
+          # NEW for Mode 3 — user's "initial angular velocity" requirement
+          angular_velocity_magnitude_range_radps: [0.0, 0.0]
+          angular_velocity_axis: random_unit_vector
+
+        # ── Wind and axis vocabularies ─────────────────────────
+        directions:
+          north:   [ 1.0,  0.0, 0.0]
+          south:   [-1.0,  0.0, 0.0]
+          east:    [ 0.0,  1.0, 0.0]
+          west:    [ 0.0, -1.0, 0.0]
+          ne:      [ 0.7071,  0.7071, 0.0]
+          nw:      [-0.7071,  0.7071, 0.0]
+          se:      [ 0.7071, -0.7071, 0.0]
+          sw:      [-0.7071, -0.7071, 0.0]
+          up:      [ 0.0, 0.0,  1.0]
+          down:    [ 0.0, 0.0, -1.0]
+
+        acceleration_classes:
+          gentle:     [0.3, 1.0]              # m/s²
+          moderate:   [1.0, 3.0]
+          aggressive: [3.0, 6.0]
+      
+        segments:
+          # z-thrust ramps, no wind
+          - t_range: [0.0, 15.0]
+            controller:
+              type: thrust_ramp
+              axis: z
+              thrust_range_frac: [0.6, 1.4]   # of mg
+              ramp_duration_s: 3.0
+              hold_duration_s: 2.0
+            wind: {type: none}
+
+          # z-thrust ramps, constant 4N wind
+          - t_range: [15.0, 30.0]
+            controller:
+              type: thrust_ramp
+              axis: z
+              thrust_range_frac: [0.6, 1.4]
+              ramp_duration_s: 3.0
+              hold_duration_s: 2.0
+            wind: {type: constant, magnitude_N: 4.0, direction: [1, 0, 0]}
+
+          # z-thrust ramp with wind step mid-ramp
+          - t_range: [30.0, 45.0]
+            controller:
+              type: thrust_ramp
+              axis: z
+              thrust_range_frac: [0.6, 1.4]
+              ramp_duration_s: 3.0
+              hold_duration_s: 2.0
+            wind:
+              type: step
+              step_time_s: 37.0
+              from_magnitude_N: 0.0
+              to_magnitude_N: 4.0
+              direction: [1, 0, 0]
+
+          # x-acceleration ramps, no wind
+          - t_range: [45.0, 60.0]
+            controller:
+              type: thrust_ramp
+              axis: x
+              thrust_range_frac: [0.6, 1.4]
+              ramp_duration_s: 3.0
+              hold_duration_s: 2.0
+            wind: {type: none}
+
+          # x-acceleration ramps, headwind
+          - t_range: [60.0, 75.0]
+            controller:
+              type: thrust_ramp
+              axis: x
+              thrust_range_frac: [0.6, 1.4]
+              ramp_duration_s: 3.0
+              hold_duration_s: 2.0
+            wind: {type: constant, magnitude_N: 4.0, direction: [-1, 0, 0]}
+
+          # Combined ramp + roll (coupled dynamics)
+          - t_range: [75.0, 90.0]
+            controller:
+              type: combined_ramp_roll
+              thrust_range_frac: [0.6, 1.4]
+              roll_rate_radps: 0.3
+              ramp_duration_s: 3.0
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          # Thrust sinusoid + wind step
+          - t_range: [90.0, 100.0]
+            controller:
+              type: thrust_sinusoid
+              amplitude_frac: 0.30            # of mg
+              frequency_hz: 0.2
+            wind:
+              type: step
+              step_time_s: 95.0
+              from_magnitude_N: 2.0
+              to_magnitude_N: 6.0
+              direction: [1, 0, 0]
+        counterfactual: true
+        # ── Scenario templates ─────────────────────────────────
+        scenarios:
+
+          # ─────────────────────────────────────────────────
+          # S1: Accelerate from rest, calm air (baseline)
+          # ─────────────────────────────────────────────────
+          - name: accelerate_from_rest_calm
+            weight: 0.12
+            phases:
+              - duration_s: [12.0, 18.0]
+                controller:
+                  type: accel_decel
+                  axis_from_list: [north, east, ne]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [0.8, 1.8]
+                  acceleration_class: gentle
+                  return_to_start: true
+                wind: {type: none}
+
+          # ─────────────────────────────────────────────────
+          # S2: Accelerate with wind aligned or opposed to motion
+          # Covers user's "headwind" and "tailwind" as one template —
+          # they are mirror images, and the residual learns the sign flip.
+          # ─────────────────────────────────────────────────
+          - name: accelerate_wind_aligned
+            weight: 0.14
+            phases:
+              - duration_s: [12.0, 18.0]
+                controller:
+                  type: accel_decel
+                  axis: [1, 0, 0]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [0.8, 2.0]
+                  acceleration_class: moderate
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 5.0]
+                  direction_from_list: [north, south]  # aligned or opposed
+
+          # ─────────────────────────────────────────────────
+          # S3: Accelerate with crosswind (user list: "with a crosswind")
+          # ─────────────────────────────────────────────────
+          - name: accelerate_crosswind
+            weight: 0.12
+            phases:
+              - duration_s: [12.0, 18.0]
+                controller:
+                  type: accel_decel
+                  axis: [1, 0, 0]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [0.8, 1.8]
+                  acceleration_class: moderate
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 5.0]
+                  direction_from_list: [east, west, up, down]
+
+          # ─────────────────────────────────────────────────
+          # S4: Accelerate from already-moving state (user list)
+          # Drone enters with non-zero velocity; controller continues
+          # the acceleration from there, so the ramp is shorter and
+          # the initial-state distribution is broader.
+          # ─────────────────────────────────────────────────
+          - name: accelerate_from_moving
+            weight: 0.10
+            initial_conditions:
+              velocity_magnitude_range_mps: [0.4, 1.2]
+              velocity_direction: random_unit_vector
+            phases:
+              - duration_s: [10.0, 15.0]
+                controller:
+                  type: accel_decel
+                  axis_from_list: [north, east, ne]
+                  start_from_initial_velocity: true
+                  peak_velocity_range_mps: [1.2, 2.5]
+                  acceleration_class: moderate
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S5: Gust midway through acceleration (user list)
+          # Controller must reject the gust while still executing the ramp.
+          # ─────────────────────────────────────────────────
+          - name: gust_mid_acceleration
+            weight: 0.10
+            phases:
+              - duration_s: [15.0, 20.0]
+                controller:
+                  type: accel_decel
+                  axis: [1, 0, 0]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [1.0, 2.0]
+                  acceleration_class: moderate
+                  return_to_start: true
+                wind:
+                  type: gust_mid
+                  trigger_at_progress: [0.35, 0.65]   # fraction of trajectory
+                  peak_magnitude_N: [5.0, 8.0]
+                  duration_s: [0.3, 0.8]
+                  direction: [-1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S6a: Trapezoidal ramp — near-rectangular velocity profile
+          # Same endpoints as S6b, but long time spent at peak velocity.
+          # ─────────────────────────────────────────────────
+          - name: same_target_trapezoid
+            weight: 0.08
+            pair_group: ramp_profile_comparison
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: accel_decel
+                  axis: [1, 0, 0]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [1.0, 2.0]    # ← shared with S6b
+                  ramp_fraction: 0.05                    # near-rectangular
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 4.0]                # ← shared with S6b
+                  direction: [-1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S6b: Triangular ramp — velocity constantly changing
+          # Same endpoints and peak as S6a, but ramp_fraction = 1.0
+          # means no hold phase at the peak.
+          # ─────────────────────────────────────────────────
+          - name: same_target_triangle
+            weight: 0.08
+            pair_group: ramp_profile_comparison
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: accel_decel
+                  axis: [1, 0, 0]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [1.0, 2.0]    # ← shared with S6a
+                  ramp_fraction: 1.0                     # triangular
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 4.0]                # ← shared with S6a
+                  direction: [-1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S8: Lateral acceleration (±Y)
+          # Fills 3D direction coverage — S1/S2/S3 focus on X.
+          # ─────────────────────────────────────────────────
+          - name: lateral_acceleration
+            weight: 0.08
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: accel_decel
+                  axis_from_list: [east, west]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [0.8, 1.8]
+                  acceleration_class: moderate
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 4.0]
+                  direction_from_list: [north, south]
+
+          # ─────────────────────────────────────────────────
+          # S9: Initial angular velocity perturbation (user list)
+          # ω ≠ 0 at spawn; controller must stabilise AND track the ramp.
+          # ─────────────────────────────────────────────────
+          - name: initial_angular_velocity
+            weight: 0.08
+            initial_conditions:
+              angular_velocity_magnitude_range_radps: [0.3, 1.0]
+              angular_velocity_axis: random_unit_vector
+            phases:
+              - duration_s: [10.0, 14.0]
+                controller:
+                  type: accel_decel
+                  axis: [1, 0, 0]
+                  start_velocity_range_mps: [0.0, 0.0]
+                  peak_velocity_range_mps: [0.8, 1.5]
+                  acceleration_class: moderate
+                  return_to_start: true
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction: [-1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S10: Thrust sinusoid — high-frequency acceleration
+          # Captures rapid acceleration sign flips that the world
+          # model must resolve at 100 Hz.
+          # ─────────────────────────────────────────────────
+          - name: thrust_sinusoid
+            weight: 0.08
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: thrust_sinusoid
+                  amplitude_frac: [0.20, 0.40]           # of mg
+                  frequency_hz: [0.15, 0.35]
+                  axis: z
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 4.0]
+                  direction_from_list: [up, down, north]
+
+        # ── Paired scenarios ──────────────────────────────────
+        # The two members share the parameters listed in `shared`,
+        # so the training pipeline can pair them for controlled
+        # comparison: same (s_0, s_T, V_peak, F_w) but different
+        # intermediate V(t). This is the user's scenario #6.
+        paired_scenarios:
+          - name: ramp_profile_comparison
+            members: [same_target_trapezoid, same_target_triangle]
+            shared:
+              - peak_velocity_range_mps
+              - start_velocity_range_mps
+              - total_duration_s
+              - wind_magnitude_N
+              - wind_direction
+            pair_id_prefix: "ramp_profile"
+
+        # ── Sampling policy ───────────────────────────────────
+        sampling:
+          guarantee_coverage: true                # each scenario appears ≥1×
+          pairs_generated_together: true          # paired members always co-generated
+
+        # ── Expected composition ──────────────────────────────
+        report:
+          trajectory_count: 18
+          scenarios_present: 10
+          avg_duration_s: 15.0
+          total_steps: ~27000                     # 15 s × 100 Hz × 18
+          paired_pairs_generated: 1               # the S6a/S6b pair
+
+          # Coverage matrix vs user's "important scenarios" list
+          coverage:
+            from_rest_calm_air:         S1
+            against_headwind:           S2 (direction south when axis north)
+            with_crosswind:             S3
+            from_moving_state:          S4
+            gust_mid_acceleration:      S5
+            same_V_different_profile:   S6a + S6b (paired)
+            # supplemental coverage
+            with_tailwind:              S2 (direction north when axis north)
+            lateral_acceleration:       S8
+            initial_angular_velocity:   S9
+            high_freq_acceleration:     S10
+
+      counterfactual: true
+
+    # ==========================================================
+    # MODE 4: YAW MOTION (12.5%)
+    # Forces the model to learn body-frame Rᵀ F_w transformation.
+    # ==========================================================
+    # ==========================================================
+    # MODE 4: YAW MOTION (12.5%)
+    # ==========================================================
+    # Forces the model to learn body-frame Rᵀ F_w transformation
+    # as the drone rotates.
+    #
+    # Every scenario exercises a distinct combination of:
+    #   - yaw angle        (small, medium, large, near-full)
+    #   - yaw direction    (CW and CCW, paired)
+    #   - yaw rate         (slow / moderate / fast)
+    #   - yaw acceleration (gradual ramp vs abrupt step)
+    #   - initial heading  (four quadrants + near-π boundary)
+    #   - initial ωz       (zero vs non-zero)
+    #   - flight condition (hovering vs translating)
+    #   - wind             (calm, crosswind, gust)
+    #   - yaw profile      (step, ramp, sinusoidal)
+    #
+    # Trajectory count: 12–13 (12.5% of 100). With guarantee_coverage
+    # every scenario appears once; two of them (heading_180 rate pair
+    # and CW/CCW pair) are co-generated as matched pairs.
+    # ==========================================================
+    yaw:
+      fraction: 0.125
+      definition:
+        duration_s: 100.0
+        altitudes: [1.0, 1.5, 2.0]
+        duration_range_s: [10.0, 22.0]
+        altitudes_m: [1.0, 1.5, 2.0]
+        # ── Initial conditions ─────────────────────────────────
+        initial_conditions:
+          position_xy_range_m: [-2.0, 2.0]
+          position_z_offset_m: [-0.1, 0.1]
+          velocity_magnitude_range_mps: [0.0, 0.0]
+          velocity_direction: random_unit_vector
+          roll_offset_deg: 0.0
+          pitch_offset_deg: 0.0
+          # Full yaw coverage by default; scenarios can pin a range
+          yaw_range_rad: [-3.14159, 3.14159]
+          # Initial angular velocity — zero by default, overridden in S6
+          angular_velocity_magnitude_range_radps: [0.0, 0.0]
+          angular_velocity_axis: [0, 0, 1]      # pure yaw when nonzero
+
+        # ── Rate and profile vocabularies ─────────────────────
+        yaw_rates_radps:
+          slow:     [0.15, 0.50]
+          moderate: [0.50, 1.20]
+          fast:     [1.20, 2.50]
+
+        yaw_profiles:
+          step:       abrupt target change (single sample)
+          ramp:       linear approach to target over ramp_duration
+          sinusoidal: continuous sinusoidal command
+
+        # ── Wind direction vocabulary ─────────────────────────
+        directions:
+          north:   [ 1.0,  0.0, 0.0]
+          south:   [-1.0,  0.0, 0.0]
+          east:    [ 0.0,  1.0, 0.0]
+          west:    [ 0.0, -1.0, 0.0]
+          ne:      [ 0.7071,  0.7071, 0.0]
+          nw:      [-0.7071,  0.7071, 0.0]
+          up:      [ 0.0, 0.0,  1.0]
+          down:    [ 0.0, 0.0, -1.0]
+        segments:
+          - t_range: [0.0, 10.0]
+            controller: {type: hover}
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          - t_range: [10.0, 20.0]
+            controller:
+              type: yaw_sine
+              amplitude_radps: 0.5
+              frequency_hz: 0.2
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          - t_range: [20.0, 30.0]
+            controller:
+              type: yaw_step
+              target_rad: 1.5708             # π/2
+              hold_s: 5.0
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          - t_range: [30.0, 40.0]
+            controller:
+              type: yaw_step
+              target_rad: 3.1416             # π
+              hold_s: 5.0
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          # Same actions, wind rotated 90° → forces Rᵀ learning
+          - t_range: [40.0, 50.0]
+            controller:
+              type: yaw_sine
+              amplitude_radps: 0.5
+              frequency_hz: 0.2
+            wind: {type: constant, magnitude_N: 2.0, direction: [0, 1, 0]}
+
+          - t_range: [50.0, 60.0]
+            controller:
+              type: yaw_step
+              target_rad: 1.5708
+              hold_s: 5.0
+            wind: {type: constant, magnitude_N: 2.0, direction: [0, 1, 0]}
+
+          # Circle with yaw tracking tangent
+          - t_range: [60.0, 70.0]
+            controller:
+              type: circle
+              radius_m: 2.0
+              omega_radps: 0.3
+              yaw_follows_tangent: true
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          - t_range: [70.0, 80.0]
+            controller:
+              type: circle
+              radius_m: 2.0
+              omega_radps: 0.3
+              yaw_follows_tangent: true
+            wind: {type: constant, magnitude_N: 2.0, direction: [0, 1, 0]}
+
+          # Random yaw + small translation + wind step
+          - t_range: [80.0, 100.0]
+            controller:
+              type: yaw_random
+              yaw_rate_range_radps: [-0.5, 0.5]
+              translation_rate_range_mps: [-0.3, 0.3]
+              resample_interval_s: 0.5
+            wind:
+              type: step
+              step_time_s: 90.0
+              from_magnitude_N: 2.0
+              to_magnitude_N: 6.0
+              direction: [1, 0, 0]
+        counterfactual: true
+        
+        # ── Scenario templates ─────────────────────────────────
+        scenarios:
+
+          # ─────────────────────────────────────────────────
+          # S1: 90° heading change while hovering (user list #1)
+          # ─────────────────────────────────────────────────
+          - name: heading_change_90_hover
+            weight: 0.10
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [1.5708]       # exactly +90°
+                  rate_class: moderate
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S2a: 180° turn — SLOW (user list #2, member 1/2)
+          # Shared target and wind with S2b; differs only in rate.
+          # ─────────────────────────────────────────────────
+          - name: heading_change_180_slow
+            weight: 0.10
+            pair_group: heading_180_rate_comparison
+            phases:
+              - duration_s: [15.0, 20.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [3.1416]       # 180° (matched with S2b)
+                  rate_class: slow                  # ★ differs
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]           # matched with S2b
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S2b: 180° turn — FAST (user list #2, member 2/2)
+          # Same endpoint and wind as S2a → different intermediate
+          # dynamics. Pairs give controlled comparison.
+          # ─────────────────────────────────────────────────
+          - name: heading_change_180_fast
+            weight: 0.10
+            pair_group: heading_180_rate_comparison
+            phases:
+              - duration_s: [15.0, 20.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [3.1416]       # 180° (matched with S2a)
+                  rate_class: fast                  # ★ differs
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]           # matched with S2a
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S3: Yaw rotation while translating forward (user list #3)
+          # Couples yaw with forward velocity — the drone traces a
+          # spiral or arc while its heading rotates.
+          # ─────────────────────────────────────────────────
+          - name: yaw_while_translating
+            weight: 0.12
+            phases:
+              - duration_s: [15.0, 22.0]
+                controller:
+                  type: yaw_while_translating
+                  forward_velocity_range_mps: [0.5, 1.2]
+                  yaw_rate_class: moderate
+                  yaw_total_rad: [1.5708, 3.1416]   # 90° or 180°
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction_from_list: [north, east, ne]
+
+          # ─────────────────────────────────────────────────
+          # S4: Rapid yaw command followed by settling (user list #4)
+          # Abrupt step profile → dominant transient.
+          # ─────────────────────────────────────────────────
+          - name: rapid_yaw_settling
+            weight: 0.08
+            phases:
+              - duration_s: [10.0, 14.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [0.7854, 1.5708]  # 45° or 90°
+                  rate_class: fast
+                  transition_profile: step          # ★ abrupt
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S5: Yaw rotation under a lateral gust (user list #5)
+          # Gust strikes at a random point in the maneuver.
+          # ─────────────────────────────────────────────────
+          - name: yaw_under_gust
+            weight: 0.08
+            phases:
+              - duration_s: [12.0, 18.0]
+                controller:
+                  type: yaw_ramp
+                  target_change_rad: [1.5708]
+                  rate_class: moderate
+                wind:
+                  type: gust_mid
+                  trigger_at_progress: [0.30, 0.70]
+                  peak_magnitude_N: [4.0, 7.0]
+                  duration_s: [0.3, 0.8]
+                  direction_from_list: [east, west, south, north]
+
+          # ─────────────────────────────────────────────────
+          # S6: Nonzero initial yaw rate (user list #6)
+          # ω_z ≠ 0 at spawn; controller stabilises AND executes yaw.
+          # ─────────────────────────────────────────────────
+          - name: initial_yaw_rate
+            weight: 0.08
+            initial_conditions:
+              angular_velocity_magnitude_range_radps: [0.3, 1.2]
+              angular_velocity_axis: [0, 0, 1]        # pure yaw
+            phases:
+              - duration_s: [10.0, 15.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [1.5708, 3.1416]
+                  rate_class: moderate
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S7a: CW rotation 90° (user list: both directions, member 1/2)
+          # ─────────────────────────────────────────────────
+          - name: yaw_cw_90
+            weight: 0.05
+            pair_group: yaw_cw_ccw_90
+            phases:
+              - duration_s: [10.0, 14.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [-1.5708]      # −90° = clockwise
+                  rate_class: moderate              # matched with S7b
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 3.5]           # matched with S7b
+                  direction: [0, 1, 0]              # matched with S7b
+
+          # ─────────────────────────────────────────────────
+          # S7b: CCW rotation 90° — exact mirror of S7a (member 2/2)
+          # ─────────────────────────────────────────────────
+          - name: yaw_ccw_90
+            weight: 0.05
+            pair_group: yaw_cw_ccw_90
+            phases:
+              - duration_s: [10.0, 14.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [1.5708]       # +90° = counterclockwise
+                  rate_class: moderate              # matched with S7a
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 3.5]           # matched with S7a
+                  direction: [0, 1, 0]              # matched with S7a
+
+          # ─────────────────────────────────────────────────
+          # S8: Quaternion boundary crossing at ±180°
+          # Start near +π and command a positive change → crosses
+          # +π into -π region. Tests quaternion sign consistency.
+          # ─────────────────────────────────────────────────
+          - name: boundary_crossing_pi
+            weight: 0.08
+            initial_conditions:
+              yaw_range_rad: [2.80, 3.10]           # +160° to +178°
+            phases:
+              - duration_s: [10.0, 15.0]
+                controller:
+                  type: yaw_step
+                  target_change_rad: [0.50, 1.00]   # forces crossing +π
+                  rate_class: moderate
+                  transition_profile: ramp
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S9: Initial-heading variety across four quadrants
+          # Ensures the model sees yaw at +90, +180, -90, 0 uniformly.
+          # ─────────────────────────────────────────────────
+          - name: initial_heading_variety
+            weight: 0.08
+            initial_conditions:
+              yaw_range_rad: [-3.14159, 3.14159]    # full circle
+            phases:
+              - duration_s: [10.0, 15.0]
+                controller:
+                  type: yaw_sine
+                  amplitude_radps: [0.30, 0.80]
+                  frequency_hz: [0.15, 0.35]
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S10: Sinusoidal yaw sweep — broad continuous coverage
+          # Integrates to ±90–180° excursions, exercises many
+          # yaw-rate reversal points.
+          # ─────────────────────────────────────────────────
+          - name: sinusoidal_sweep
+            weight: 0.08
+            phases:
+              - duration_s: [15.0, 22.0]
+                controller:
+                  type: yaw_sine
+                  amplitude_radps: [0.40, 1.00]
+                  frequency_hz: [0.10, 0.25]
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east, up]   # up exercise vertical component
+
+        # ── Paired scenarios ──────────────────────────────────
+        # Two kinds of pairs:
+        # 1. Rate comparison (S2a/S2b): same endpoint, different rate
+        # 2. Direction mirror (S7a/S7b): same |change|, opposite sign
+        paired_scenarios:
+          - name: heading_180_rate_comparison
+            members: [heading_change_180_slow, heading_change_180_fast]
+            shared:
+              - target_change_rad
+              - wind_magnitude_N
+              - wind_direction
+              - total_duration_s
+            pair_id_prefix: "heading_180_rate"
+
+          - name: yaw_cw_ccw_90
+            members: [yaw_cw_90, yaw_ccw_90]
+            shared:
+              - abs_target_change_rad
+              - rate_class
+              - wind_magnitude_N
+              - wind_direction
+              - total_duration_s
+            pair_id_prefix: "yaw_cw_ccw"
+
+        # ── Sampling policy ───────────────────────────────────
+        sampling:
+          guarantee_coverage: true                # every scenario appears ≥1×
+          pairs_generated_together: true          # pairs co-generated
+
+        # ── Expected composition ──────────────────────────────
+        report:
+          trajectory_count: 12
+          scenarios_present: 12
+          avg_duration_s: 14.0
+          total_steps: ~16800                     # 14 s × 100 Hz × 12
+          paired_pairs_generated: 2
+
+          coverage:
+            heading_90_hover:           S1
+            180_slow_vs_fast:           S2a + S2b (paired, rate comparison)
+            yaw_while_translating:      S3
+            rapid_yaw_with_settling:    S4
+            yaw_under_gust:             S5
+            nonzero_initial_yaw_rate:   S6
+            cw_vs_ccw:                  S7a + S7b (paired, direction mirror)
+            quaternion_boundary:        S8
+            initial_heading_variety:    S9
+            sinusoidal_sweep:           S10
+
+      counterfactual: true
+
+    # ==========================================================
+    # MODE 5: MODERATE ATTITUDE (15%)
+    # Exposes wind torque and vertical-wind response.
+    # ==========================================================
+    # ==========================================================
+    # MODE 5: MODERATE ATTITUDE (15%)
+    # ==========================================================
+    # ROLL + PITCH are the primary objectives. YAW appears only
+    # as a disturbance to test mode-distinct dynamics.
+    #
+    # Non-redundancy with Yaw mode:
+    #   Yaw mode    → yaw is commanded, roll/pitch held near zero
+    #   Attitude    → roll/pitch commanded, yaw only perturbed
+    # These are structurally different command profiles; the model
+    # cannot fold one into the other.
+    #
+    # Every scenario exercises a distinct combination of:
+    #   - roll target             (positive / negative, paired)
+    #   - pitch target            (forward / backward, paired)
+    #   - amplitude               (small / moderate / large)
+    #   - angular rate            (slow / fast, paired)
+    #   - angular acceleration    (gradual / abrupt, paired)
+    #   - maneuver axis           (roll / pitch / combined)
+    #   - initial attitude        (level / tilted / diagonal)
+    #   - initial angular velocity (zero / nonzero)
+    #   - disturbance             (gust / yaw perturbation / initial ω)
+    #   - hold duration           (short transient vs long hold-and-recover)
+    #
+    # Trajectory count: 15 (15% of 100). With guarantee_coverage
+    # each scenario appears once; three pairs are co-generated.
+    # ==========================================================
+    attitude:
+      fraction: 0.15
+      definition:
+        duration_s: 100.0
+        altitudes: [1.0, 1.5, 2.0]
+        duration_range_s: [10.0, 18.0]
+        altitudes_m: [1.0, 1.5, 2.0]
+
+        # ── Initial conditions ─────────────────────────────────
+        initial_conditions:
+          position_xy_range_m: [-2.0, 2.0]
+          position_z_offset_m: [-0.1, 0.1]
+          velocity_magnitude_range_mps: [0.0, 0.0]
+          velocity_direction: random_unit_vector
+          # Default level; scenarios override
+          roll_offset_deg: 0.0
+          pitch_offset_deg: 0.0
+          yaw_range_rad: [-3.14159, 3.14159]
+          angular_velocity_magnitude_range_radps: [0.0, 0.0]
+          angular_velocity_axis: random_unit_vector
+
+        # ── Amplitude classes (sampled magnitudes in degrees) ──
+        attitude_amplitudes_deg:
+          small:    [5.0, 10.0]
+          moderate: [15.0, 25.0]
+          large:    [30.0, 40.0]
+
+        # ── Rate profiles ──────────────────────────────────────
+        # Time to reach a commanded target from the current attitude.
+        # `abrupt` is a near-step input; `gradual` ramps slowly so the
+        # drone tracks a moving attitude target.
+        rate_profiles:
+          gradual:  3.0
+          moderate: 1.0
+          abrupt:   0.05
+
+        # ── Wind direction vocabulary ──────────────────────────
+        directions:
+          north: [ 1.0,  0.0, 0.0]
+          south: [-1.0,  0.0, 0.0]
+          east:  [ 0.0,  1.0, 0.0]
+          west:  [ 0.0, -1.0, 0.0]
+          ne:    [ 0.7071,  0.7071, 0.0]
+          nw:    [-0.7071,  0.7071, 0.0]
+          up:    [ 0.0, 0.0,  1.0]
+          down:  [ 0.0, 0.0, -1.0]
+
+        segments:
+          # Roll step sequence, horizontal wind
+          - t_range: [0.0, 15.0]
+            controller:
+              type: attitude_step_sequence
+              steps:
+                - {t_offset_s: 0.0,  roll_deg: 15, hold_s: 5.0}
+                - {t_offset_s: 5.0,  roll_deg: 30, hold_s: 5.0}
+                - {t_offset_s: 10.0, roll_deg: 0,  hold_s: 5.0}
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          # Pitch step sequence, vertical wind (updraft)
+          - t_range: [15.0, 30.0]
+            controller:
+              type: attitude_step_sequence
+              steps:
+                - {t_offset_s: 0.0,  pitch_deg: 15, hold_s: 5.0}
+                - {t_offset_s: 5.0,  pitch_deg: 30, hold_s: 5.0}
+                - {t_offset_s: 10.0, pitch_deg: 0,  hold_s: 5.0}
+            wind: {type: constant, magnitude_N: 2.0, direction: [0, 0, 1]}
+
+          # Roll sine, horizontal wind
+          - t_range: [30.0, 45.0]
+            controller:
+              type: attitude_sine
+              axis: roll
+              amplitude_deg: 20
+              frequency_hz: 0.3
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          # Same roll sine, vertical wind → isolates vertical-wind torque
+          - t_range: [45.0, 60.0]
+            controller:
+              type: attitude_sine
+              axis: roll
+              amplitude_deg: 20
+              frequency_hz: 0.3
+            wind: {type: constant, magnitude_N: 2.0, direction: [0, 0, 1]}
+
+          # Combined roll-pitch sine, horizontal wind
+          - t_range: [60.0, 75.0]
+            controller:
+              type: attitude_sine
+              axis: roll_pitch
+              amplitude_deg: 15
+              frequency_hz: 0.3
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          # Combined roll-pitch sine, diagonal wind
+          - t_range: [75.0, 90.0]
+            controller:
+              type: attitude_sine
+              axis: roll_pitch
+              amplitude_deg: 15
+              frequency_hz: 0.3
+            wind:
+              type: constant
+              magnitude_N: 2.0
+              direction: [0.7071, 0.7071, 0.0]
+
+          # Random attitude + wind step
+          - t_range: [90.0, 100.0]
+            controller:
+              type: attitude_random
+              roll_range_deg: [-15, 15]
+              pitch_range_deg: [-15, 15]
+              resample_interval_s: 0.5
+            wind:
+              type: step
+              step_time_s: 95.0
+              from_magnitude_N: 2.0
+              to_magnitude_N: 6.0
+              direction: [1, 0, 0]
+        counterfactual: true
+
+        # ── Scenario templates ─────────────────────────────────
+        scenarios:
+
+          # ─────────────────────────────────────────────────
+          # S1a: Roll in one direction (user list #1, member 1/2)
+          # ─────────────────────────────────────────────────
+          - name: roll_positive
+            weight: 0.05
+            pair_group: roll_pair
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_step
+                  roll_target_deg: [20.0, 30.0]
+                  pitch_target_deg: 0.0
+                  hold_duration_s: [3.0, 8.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S1b: Roll in the opposite direction (member 2/2)
+          # Same |target| and wind as S1a → sign-symmetry pair.
+          # ─────────────────────────────────────────────────
+          - name: roll_negative
+            weight: 0.05
+            pair_group: roll_pair
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_step
+                  roll_target_deg: [-30.0, -20.0]
+                  pitch_target_deg: 0.0
+                  hold_duration_s: [3.0, 8.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]     # matched with S1a
+                  direction_from_list: [north, east]  # matched
+
+          # ─────────────────────────────────────────────────
+          # S2a: Pitch forward (nose down) (user list #2, member 1/2)
+          # ─────────────────────────────────────────────────
+          - name: pitch_forward
+            weight: 0.05
+            pair_group: pitch_pair
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_step
+                  roll_target_deg: 0.0
+                  pitch_target_deg: [15.0, 25.0]
+                  hold_duration_s: [3.0, 8.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S2b: Pitch backward (nose up) (member 2/2)
+          # ─────────────────────────────────────────────────
+          - name: pitch_backward
+            weight: 0.05
+            pair_group: pitch_pair
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_step
+                  roll_target_deg: 0.0
+                  pitch_target_deg: [-25.0, -15.0]
+                  hold_duration_s: [3.0, 8.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]     # matched with S2a
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S3: Amplitude sweep (user list #3)
+          # Samples small/moderate/large amplitude across trajectories
+          # so the model sees the full range, not just one target.
+          # ─────────────────────────────────────────────────
+          - name: amplitude_sweep
+            weight: 0.12
+            phases:
+              - duration_s: [10.0, 16.0]
+                controller:
+                  type: attitude_step
+                  axis_from_list: [roll, pitch]
+                  amplitude_class_from_list: [small, moderate, large]
+                  sign: random
+                  hold_duration_s: [2.0, 5.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S4: Rapid tilt + recovery (user list #4)
+          # Short hold (0.3–1 s) so the trajectory is dominated by
+          # the up-and-back transients — very different from the
+          # long-hold trajectories above.
+          # ─────────────────────────────────────────────────
+          - name: rapid_tilt_recovery
+            weight: 0.10
+            phases:
+              - duration_s: [8.0, 12.0]
+                controller:
+                  type: attitude_step
+                  axis_from_list: [roll, pitch]
+                  amplitude_class: moderate
+                  sign: random
+                  hold_duration_s: [0.3, 1.0]     # ★ short
+                  return_to_level: true
+                  rate_profile: abrupt           # ★ snappy
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S5a: Gradual ramp to target (paired with S5b)
+          # Same target and endpoint as S5b; only the ramp duration
+          # differs. Isolates angular-acceleration effect.
+          # ─────────────────────────────────────────────────
+          - name: gradual_rate_to_target
+            weight: 0.05
+            pair_group: rate_comparison
+            phases:
+              - duration_s: [14.0, 18.0]
+                controller:
+                  type: attitude_ramp
+                  axis: roll                      # matched with S5b
+                  target_deg: [20.0, 30.0]        # matched with S5b
+                  ramp_duration_s: [2.5, 3.5]     # ★ slow
+                  hold_duration_s: [3.0, 5.0]
+                  return_to_level: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 3.5]         # matched with S5b
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S5b: Abrupt ramp to same target (paired with S5a)
+          # ─────────────────────────────────────────────────
+          - name: abrupt_rate_to_target
+            weight: 0.05
+            pair_group: rate_comparison
+            phases:
+              - duration_s: [14.0, 18.0]
+                controller:
+                  type: attitude_ramp
+                  axis: roll                      # matched with S5a
+                  target_deg: [20.0, 30.0]        # matched with S5a
+                  ramp_duration_s: [0.05, 0.15]   # ★ near-instant
+                  hold_duration_s: [3.0, 5.0]
+                  return_to_level: true
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 3.5]         # matched with S5a
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S6: Combined roll + pitch (user list #5)
+          # Simultaneous two-axis tilt. The drone's thrust vector
+          # points along a diagonal; wind torque couples both axes.
+          # ─────────────────────────────────────────────────
+          - name: combined_roll_pitch
+            weight: 0.12
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_combined
+                  roll_target_deg: [15.0, 25.0]
+                  pitch_target_deg: [15.0, 25.0]
+                  roll_sign: random
+                  pitch_sign: random
+                  hold_duration_s: [3.0, 6.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east, ne]
+
+          # ─────────────────────────────────────────────────
+          # S7: Gust under attitude hold (user list #6)
+          # Long hold (8–12 s) so the gust strikes while the drone
+          # is holding a tilted attitude. Controller must reject the
+          # disturbance without abandoning the commanded attitude.
+          # ─────────────────────────────────────────────────
+          - name: gust_under_attitude_hold
+            weight: 0.10
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_step
+                  axis_from_list: [roll, pitch]
+                  amplitude_class: moderate
+                  sign: random
+                  hold_duration_s: [8.0, 12.0]    # ★ long
+                  return_to_level: true
+                  rate_profile: moderate
+                wind:
+                  type: gust_mid
+                  trigger_at_progress: [0.40, 0.70]  # during the hold
+                  peak_magnitude_N: [4.0, 7.0]
+                  duration_s: [0.3, 0.8]
+                  direction_from_list: [east, west, north, south]
+
+          # ─────────────────────────────────────────────────
+          # S8: Initial tilt recovery
+          # Starts already tilted. Controller must recover to level
+          # from a nonzero initial attitude error (unlike S1/S2,
+          # which ramp from level).
+          # ─────────────────────────────────────────────────
+          - name: initial_tilt_recovery
+            weight: 0.10
+            initial_conditions:
+              tilt_mode_from_list: [roll_only, pitch_only, diagonal]
+              tilt_magnitude_deg: [10.0, 25.0]
+            phases:
+              - duration_s: [10.0, 14.0]
+                controller:
+                  type: hover
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S9: Nonzero initial angular velocity
+          # Level attitude, but spinning. Controller must arrest the
+          # rotation and stabilise — no attitude command is issued.
+          # ─────────────────────────────────────────────────
+          - name: initial_angular_velocity
+            weight: 0.08
+            initial_conditions:
+              angular_velocity_magnitude_range_radps: [0.5, 1.5]
+              angular_velocity_axis: random_unit_vector
+            phases:
+              - duration_s: [8.0, 12.0]
+                controller:
+                  type: hover
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S10: Yaw disturbance during attitude hold
+          # ★ Distinct from Yaw mode: here YAW is a disturbance.
+          # The objective is to hold roll while rejecting an injected
+          # yaw rate. In yaw mode, yaw IS the objective and roll is
+          # held at zero.
+          # ─────────────────────────────────────────────────
+          - name: yaw_disturbance_during_attitude_hold
+            weight: 0.08
+            phases:
+              - duration_s: [12.0, 16.0]
+                controller:
+                  type: attitude_step
+                  axis: roll
+                  target_deg: [15.0, 25.0]
+                  hold_duration_s: [6.0, 10.0]
+                  return_to_level: true
+                  rate_profile: moderate
+                  # Injects a yaw-rate command perturbation mid-hold
+                  yaw_perturbation_rate_radps: [0.3, 0.8]
+                  yaw_perturbation_time_s: [3.0, 5.0]
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+        # ── Paired scenarios ──────────────────────────────────
+        paired_scenarios:
+          - name: roll_pair
+            members: [roll_positive, roll_negative]
+            shared:
+              - abs_roll_target_deg
+              - wind_magnitude_N
+              - wind_direction
+              - hold_duration_s
+              - total_duration_s
+            pair_id_prefix: "roll_sign"
+
+          - name: pitch_pair
+            members: [pitch_forward, pitch_backward]
+            shared:
+              - abs_pitch_target_deg
+              - wind_magnitude_N
+              - wind_direction
+              - hold_duration_s
+              - total_duration_s
+            pair_id_prefix: "pitch_sign"
+
+          - name: rate_comparison
+            members: [gradual_rate_to_target, abrupt_rate_to_target]
+            shared:
+              - axis
+              - target_deg
+              - hold_duration_s
+              - wind_magnitude_N
+              - wind_direction
+              - total_duration_s
+            pair_id_prefix: "attitude_rate_profile"
+
+        # ── Sampling policy ───────────────────────────────────
+        sampling:
+          guarantee_coverage: true
+          pairs_generated_together: true
+
+        # ── Expected composition ──────────────────────────────
+        report:
+          trajectory_count: 15
+          scenarios_present: 13
+          avg_duration_s: 13.0
+          total_steps: ~19500                 # 13 s × 100 Hz × 15
+          paired_pairs_generated: 3
+
+          coverage:
+            roll_left_right:            S1a + S1b (paired)
+            pitch_fwd_back:             S2a + S2b (paired)
+            attitude_step_variety:      S3
+            rapid_tilt_recovery:        S4
+            gradual_vs_abrupt:          S5a + S5b (paired)
+            combined_roll_pitch:        S6
+            gust_under_hold:            S7
+            initial_tilt:               S8
+            initial_angular_velocity:   S9
+            yaw_during_attitude:        S10 (yaw as disturbance, not objective)
+
+      counterfactual: true
+
+
+    # ==========================================================
+    # MODE 6: COMBINED TRANSLATIONAL + ROTATIONAL (17.5%)
+    # The coupled manifold — closest to evaluation conditions.
+    # ==========================================================
+    # ==========================================================
+    # MODE 6: COMBINED TRANSLATIONAL + ROTATIONAL (17.5%)
+    # ==========================================================
+    # The coupled manifold — closest to evaluation conditions.
+    #
+    # Defining property: at least ONE phase per scenario runs
+    # TWO OR MORE controllers in parallel. Scenarios without
+    # parallel commands are redundant with Modes 2/4/5 and are
+    # excluded by design.
+    #
+    # Controller arbitration rules:
+    #   Position-mode   (line, circle, waypoint_*, figure_eight, helix_*)
+    #   Attitude-mode   (attitude_step, attitude_ramp, attitude_sine)
+    #   Yaw-mode        (yaw_step, yaw_ramp, yaw_sine)
+    #   Thrust-mode     (thrust_ramp, thrust_sinusoid)
+    # One controller from each mode may run simultaneously.
+    # Two controllers from the SAME mode conflict and are rejected.
+    #
+    # Event manifest: every trajectory records a list of
+    #   {t, type, id, params}
+    # for every maneuver start/end, wind change, gust, and
+    # physics perturbation. See `report.event_log_spec` below.
+    #
+    # Trajectory count: 18 (17.5% of 100). With guarantee_coverage
+    # every scenario appears ≥1×; two pairs co-generated.
+    # ==========================================================
+    combined:
+      fraction: 0.175
+      definition:
+        duration_s: 100.0
+        altitudes: [1.0, 2.0, 3.0]
+        duration_range_s: [20.0, 40.0]
+        altitudes_m: [1.0, 1.5, 2.0, 2.5]
+
+        initial_conditions:
+          position_xy_range_m: [-2.0, 2.0]
+          position_z_offset_m: [-0.1, 0.1]
+          velocity_magnitude_range_mps: [0.0, 0.8]
+          velocity_direction: random_unit_vector
+          roll_offset_deg: [-5.0, 5.0]
+          pitch_offset_deg: [-5.0, 5.0]
+          yaw_range_rad: [-3.14159, 3.14159]
+          angular_velocity_magnitude_range_radps: [0.0, 0.3]
+          angular_velocity_axis: random_unit_vector
+
+        directions:
+          north:   [ 1.0,  0.0, 0.0]
+          south:   [-1.0,  0.0, 0.0]
+          east:    [ 0.0,  1.0, 0.0]
+          west:    [ 0.0, -1.0, 0.0]
+          ne:      [ 0.7071,  0.7071, 0.0]
+          nw:      [-0.7071,  0.7071, 0.0]
+          up:      [ 0.0, 0.0,  1.0]
+          down:    [ 0.0, 0.0, -1.0]
+
+        intensity_classes:
+          gentle:     {velocity_scale: 0.5, rate_scale: 0.5}
+          moderate:   {velocity_scale: 1.0, rate_scale: 1.0}
+          aggressive: {velocity_scale: 1.8, rate_scale: 1.8}
+
+        transition_profiles:
+          smooth: {ramp_duration_s: 2.0}
+          abrupt: {ramp_duration_s: 0.1}
+
+
+        segments:
+          # Figure-eight, constant wind
+          - t_range: [0.0, 20.0]
+            controller:
+              type: figure_eight
+              amplitude_m: [2.0, 1.5]
+              frequency_hz: 0.1
+              altitude_m: 1.5
+              yaw_follows_tangent: true
+            wind: {type: constant, magnitude_N: 2.0, direction: [1, 0, 0]}
+
+          # Same figure-eight, wind step 2→6 N
+          - t_range: [20.0, 40.0]
+            controller:
+              type: figure_eight
+              amplitude_m: [2.0, 1.5]
+              frequency_hz: 0.1
+              altitude_m: 1.5
+              yaw_follows_tangent: true
+            wind:
+              type: step
+              step_time_s: 30.0
+              from_magnitude_N: 2.0
+              to_magnitude_N: 6.0
+              direction: [1, 0, 0]
+
+          # Helix climb, sinusoidal wind
+          - t_range: [40.0, 55.0]
+            controller:
+              type: helix_climb
+              radius_m: 2.0
+              omega_radps: 0.3
+              climb_rate_mps: 0.2
+              yaw_follows_tangent: true
+            wind:
+              type: sinusoidal
+              amplitude_N: 3.0
+              frequency_hz: 0.2
+              direction: [1, 0, 0]
+
+          # Helix descent, gust at midpoint
+          - t_range: [55.0, 70.0]
+            controller:
+              type: helix_descent
+              radius_m: 2.0
+              omega_radps: 0.3
+              descent_rate_mps: 0.2
+              yaw_follows_tangent: true
+            wind:
+              type: gust
+              gust_time_s: 62.0
+              from_magnitude_N: 2.0
+              peak_magnitude_N: 6.0
+              duration_s: 0.5
+              direction: [1, 0, 0]
+
+          # Random waypoints, Dryden turbulence
+          - t_range: [70.0, 85.0]
+            controller:
+              type: waypoint_random
+              sample_radius_m: 3.0
+              sample_interval_s: 2.0
+            wind:
+              type: dryden
+              sigma: 1.5
+              length_scale_m: 100.0
+
+          # Random waypoints, wind step 6→0
+          - t_range: [85.0, 100.0]
+            controller:
+              type: waypoint_random
+              sample_radius_m: 3.0
+              sample_interval_s: 2.0
+            wind:
+              type: step
+              step_time_s: 92.0
+              from_magnitude_N: 6.0
+              to_magnitude_N: 0.0
+              direction: [1, 0, 0]
+        counterfactual: true
+
+        scenarios:
+
+          # ─────────────────────────────────────────────────
+          # S1: Hover → accel → decel → hover  (user example 1)
+          # ★ Parallel phase: accel_fwd + slight nose-down pitch
+          # ─────────────────────────────────────────────────
+          - name: hover_accel_decel_hover
+            weight: 0.10
+            initial_conditions:
+              velocity_magnitude_range_mps: [0.0, 0.0]
+            phases:
+              - duration_s: 3.0
+                controller: {type: hover}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: [1, 0, 0],
+                    velocity_range_mps: [0.8, 1.5],
+                    acceleration_profile: moderate}
+                  - {type: attitude_step, axis: pitch,
+                    amplitude_class: small, sign: positive,
+                    hold_duration_s: 5.0, return_to_level: true}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction_from_list: [south, west]       # opposing
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: [1, 0, 0]}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [south, west]
+              - duration_s: 3.0
+                controller: {type: hover}
+                wind: {type: none}
+
+          # ─────────────────────────────────────────────────
+          # S2: Translate forward → yaw 90° → continue  (user example 2)
+          # ★ Parallel phase: translation + yaw simultaneously
+          # ─────────────────────────────────────────────────
+          - name: translate_yaw_continue
+            weight: 0.10
+            phases:
+              - duration_s: 4.0
+                controller:
+                  type: line
+                  direction_from_list: [north, east]
+                  velocity_range_mps: [0.7, 1.2]
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: "current_heading",
+                    velocity_range_mps: [0.7, 1.2]}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: moderate, transition_profile: ramp}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.5]
+                  direction: [1, 0, 0]                   # world-frame
+              - duration_s: 4.0
+                controller:
+                  type: line
+                  direction: "current_heading"
+                  velocity_range_mps: [0.7, 1.2]
+                wind:
+                  type: step
+                  step_time_s: 11.0
+                  from_magnitude_N: 2.0
+                  to_magnitude_N: 4.0
+                  direction: [1, 0, 0]
+              - duration_s: 3.0
+                controller: {type: hover}
+
+          # ─────────────────────────────────────────────────
+          # S3: Accelerate → gust → attitude correction → braking  (user example 3)
+          # ★ Gust arrives DURING acceleration
+          # ─────────────────────────────────────────────────
+          - name: accel_gust_correct_brake
+            weight: 0.08
+            phases:
+              - duration_s: 5.0
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  velocity_range_mps: [1.0, 1.8]
+                  acceleration_profile: aggressive
+                wind:
+                  type: gust_mid
+                  trigger_at_progress: [0.30, 0.60]
+                  peak_magnitude_N: [5.0, 8.0]
+                  duration_s: [0.4, 0.8]
+                  direction_from_list: [east, west]       # lateral → forces attitude correction
+              - duration_s: 4.0
+                controller:
+                  type: attitude_step
+                  axis: roll
+                  amplitude_class: moderate
+                  sign: random
+                  hold_duration_s: 2.0
+                  return_to_level: true
+                  rate_profile: abrupt
+                wind:
+                  type: constant
+                  magnitude_N: [2.0, 3.5]
+                  direction_from_list: [north, south]
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: [1, 0, 0]}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, south]
+
+          # ─────────────────────────────────────────────────
+          # S4: Roll + pitch simultaneously while translating  (user example 4)
+          # ★ Three-axis parallel
+          # ─────────────────────────────────────────────────
+          - name: roll_pitch_while_translating
+            weight: 0.08
+            phases:
+              - duration_s: 4.0
+                controller:
+                  type: line
+                  direction_from_list: [ne, nw]
+                  velocity_range_mps: [0.6, 1.2]
+                  acceleration_profile: gradual
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [east, north]
+              - duration_s: 6.0
+                controller:                              # ★ PARALLEL (3 controllers)
+                  - {type: line, direction: "current_heading",
+                    velocity_range_mps: [0.6, 1.2]}
+                  - {type: attitude_step, axis: roll,
+                    amplitude_class: moderate, sign: random,
+                    hold_duration_s: 2.0, return_to_level: true,
+                    rate_profile: moderate}
+                  - {type: attitude_step, axis: pitch,
+                    amplitude_class: moderate, sign: random,
+                    hold_duration_s: 2.0, return_to_level: true,
+                    rate_profile: moderate}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [up, north]         # vertical or horizontal
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [east, north]
+
+          # ─────────────────────────────────────────────────
+          # S5: Accelerate, yaw, then decelerate under changing wind  (user example 5)
+          # ★ Full coupling: 3 controllers in parallel + wind steps
+          # ─────────────────────────────────────────────────
+          - name: accel_yaw_decel_changing_wind
+            weight: 0.08
+            phases:
+              - duration_s: 4.0
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  velocity_range_mps: [0.8, 1.5]
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: 2.0
+                  direction: [1, 0, 0]
+              - duration_s: 6.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: "current_heading",
+                    velocity_range_mps: [0.8, 1.5]}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: moderate, transition_profile: ramp}
+                wind:
+                  type: multi_step
+                  direction_from_list: [north, east]
+                  steps:
+                    - {t_s: 4.0, magnitude_N: 2.0}
+                    - {t_s: 7.0, magnitude_N: 4.0}
+                    - {t_s: 10.0, magnitude_N: 6.0}
+              - duration_s: 5.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: sinusoidal
+                  amplitude_N: [2.0, 3.0]
+                  frequency_hz: [0.1, 0.3]
+                  direction_from_list: [east, north]
+
+          # ─────────────────────────────────────────────────
+          # S6a: Physics comparison — NOMINAL mass/inertia  (user example 6, member 1/2)
+          # Same commands as S6b; only the physics differs.
+          # ★ Enables causal comparison: same input, different physical params
+          # ─────────────────────────────────────────────────
+          - name: same_sequence_nominal_physics
+            weight: 0.05
+            pair_group: physics_comparison
+            physics_modifiers:
+              mass_scale: 1.0                         # matched
+              inertia_scale: 1.0                      # matched
+              drag_scale: 1.0                         # matched
+            phases:
+              - duration_s: 4.0
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  velocity_range_mps: [1.0, 1.5]      # matched with S6b
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: 3.0                    # matched with S6b
+                  direction: [-1, 0, 0]               # matched with S6b
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: "current_heading",
+                    velocity_range_mps: [1.0, 1.5]}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: moderate, transition_profile: ramp}
+                wind:
+                  type: constant
+                  magnitude_N: 3.0                    # matched
+                  direction: [-1, 0, 0]
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: constant
+                  magnitude_N: 3.0                    # matched
+                  direction: [-1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S6b: Physics comparison — PERTURBED  (member 2/2)
+          # Exact same commands and wind; mass +15%, inertia +10%, drag +25%.
+          # ★ The only difference is physics — perfect causal pair.
+          # ─────────────────────────────────────────────────
+          - name: same_sequence_perturbed_physics
+            weight: 0.05
+            pair_group: physics_comparison
+            physics_modifiers:
+              mass_scale: [1.10, 1.20]                # sampled
+              inertia_scale: [1.05, 1.15]             # sampled
+              drag_scale: [1.20, 1.30]                # sampled
+            phases:
+              - duration_s: 4.0
+                controller:
+                  type: line
+                  direction: [1, 0, 0]
+                  velocity_range_mps: [1.0, 1.5]      # matched with S6a
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: 3.0                    # matched
+                  direction: [-1, 0, 0]
+              - duration_s: 5.0
+                controller:
+                  - {type: line, direction: "current_heading",
+                    velocity_range_mps: [1.0, 1.5]}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: moderate, transition_profile: ramp}
+                wind:
+                  type: constant
+                  magnitude_N: 3.0
+                  direction: [-1, 0, 0]
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: constant
+                  magnitude_N: 3.0
+                  direction: [-1, 0, 0]
+
+          # ─────────────────────────────────────────────────
+          # S7: Unexpected gust mid-maneuver  (user example 7)
+          # Gust timing sampled per trajectory — mid-accel, mid-yaw, mid-brake.
+          # ★ Cannot be predicted from action alone
+          # ─────────────────────────────────────────────────
+          - name: unexpected_gust_mid_maneuver
+            weight: 0.08
+            phases:
+              - duration_s: 3.0
+                controller:
+                  type: line
+                  direction_from_list: [north, east, ne]
+                  velocity_range_mps: [0.8, 1.5]
+                  acceleration_profile: moderate
+                wind:
+                  type: constant
+                  magnitude_N: [1.0, 2.0]
+                  direction_from_list: [north, east]
+              - duration_s: 6.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: "current_heading",
+                    velocity_range_mps: [0.8, 1.5]}
+                  - {type: attitude_sine, axis: roll_pitch,
+                    amplitude_deg: [10, 15],
+                    frequency_hz: [0.2, 0.4]}
+                wind:
+                  type: gust_mid
+                  trigger_at_progress: [0.20, 0.80]       # UNPREDICTABLE timing
+                  peak_magnitude_N: [5.0, 8.0]
+                  duration_s: [0.3, 1.0]
+                  direction_from_list: [east, west, north, south]
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S8: Recovery after disturbance
+          # User list: "recovery behavior: stable recovery or continued maneuvering"
+          # ★ Demonstrates explicit post-disturbance settling
+          # ─────────────────────────────────────────────────
+          - name: recovery_after_disturbance
+            weight: 0.06
+            phases:
+              - duration_s: 2.0
+                controller: {type: hover}
+                wind: {type: none}
+              - duration_s: 1.0
+                controller:                              # ★ PARALLEL disturbance
+                  - {type: hover}
+                  - {type: attitude_step, axis: roll,
+                    amplitude_class: large, sign: random,
+                    hold_duration_s: 1.0, return_to_level: false,
+                    rate_profile: abrupt}
+                wind:
+                  type: gust_mid
+                  trigger_at_progress: [0.0, 0.5]
+                  peak_magnitude_N: [6.0, 9.0]
+                  duration_s: [0.5, 1.0]
+                  direction_from_list: [east, west, north, south]
+              - duration_s: 8.0
+                controller: {type: hover}                # recovery window
+                wind:
+                  type: constant
+                  magnitude_N: [1.5, 3.0]
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S9a: Intensity comparison — GENTLE  (user: "maneuver intensity")
+          # ★ Low velocities and rates; smooth transitions
+          # ─────────────────────────────────────────────────
+          - name: gentle_maneuver_sequence
+            weight: 0.05
+            pair_group: intensity_comparison
+            phases:
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: [1, 0, 0],
+                    velocity_range_mps: [0.4, 0.6],     # matched with S9b scaled down
+                    acceleration_profile: gradual}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: slow, transition_profile: smooth}
+                wind:
+                  type: constant
+                  magnitude_N: 2.0                    # matched with S9b
+                  direction_from_list: [north, east]
+              - duration_s: 6.0
+                controller:
+                  type: attitude_sine
+                  axis: roll_pitch
+                  amplitude_deg: 8
+                  frequency_hz: 0.15
+                wind:
+                  type: constant
+                  magnitude_N: 2.0
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S9b: Intensity comparison — AGGRESSIVE  (member 2/2)
+          # ★ Same sequence and wind as S9a, but 2× velocity and rate
+          # ─────────────────────────────────────────────────
+          - name: aggressive_maneuver_sequence
+            weight: 0.05
+            pair_group: intensity_comparison
+            phases:
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: [1, 0, 0],
+                    velocity_range_mps: [1.5, 2.0],     # matched with S9a scaled up
+                    acceleration_profile: aggressive}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: fast, transition_profile: abrupt}
+                wind:
+                  type: constant
+                  magnitude_N: 2.0                    # matched with S9a
+                  direction_from_list: [north, east]
+              - duration_s: 6.0
+                controller:
+                  type: attitude_sine
+                  axis: roll_pitch
+                  amplitude_deg: 20
+                  frequency_hz: 0.4
+                wind:
+                  type: constant
+                  magnitude_N: 2.0
+                  direction_from_list: [north, east]
+
+          # ─────────────────────────────────────────────────
+          # S10a: Transition profile — SMOOTH  (user: "smooth or abrupt")
+          # ★ Same endpoint, ramp over 2 s
+          # ─────────────────────────────────────────────────
+          - name: smooth_transition
+            weight: 0.05
+            pair_group: transition_comparison
+            phases:
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: [1, 0, 0],
+                    velocity_range_mps: [1.0, 1.5],     # matched with S10b
+                    acceleration_profile: gradual}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: moderate,
+                    transition_profile: smooth}         # ★ ramp_duration = 2.0 s
+                wind:
+                  type: constant
+                  magnitude_N: 3.0                    # matched with S10b
+                  direction: [0, 1, 0]
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: constant
+                  magnitude_N: 3.0
+                  direction: [0, 1, 0]
+
+          # ─────────────────────────────────────────────────
+          # S10b: Transition profile — ABRUPT  (member 2/2)
+          # ★ Same endpoint, ramp over 0.1 s
+          # ─────────────────────────────────────────────────
+          - name: abrupt_transition
+            weight: 0.05
+            pair_group: transition_comparison
+            phases:
+              - duration_s: 5.0
+                controller:                              # ★ PARALLEL
+                  - {type: line, direction: [1, 0, 0],
+                    velocity_range_mps: [1.0, 1.5],     # matched
+                    acceleration_profile: aggressive}
+                  - {type: yaw_ramp, target_change_rad: [1.5708],
+                    rate_class: fast,
+                    transition_profile: abrupt}         # ★ ramp_duration = 0.1 s
+                wind:
+                  type: constant
+                  magnitude_N: 3.0
+                  direction: [0, 1, 0]
+              - duration_s: 4.0
+                controller: {type: brake_to_zero, axis: "current_heading"}
+                wind:
+                  type: constant
+                  magnitude_N: 3.0
+                  direction: [0, 1, 0]
+
+          # ─────────────────────────────────────────────────
+          # S11: Random multi-axis + all wind types (decorrelation workhorse)
+          # ★ The largest single scenario — random everything.
+          # This is the strongest anti-shortcut data in the entire dataset.
+          # ─────────────────────────────────────────────────
+          - name: random_multi_axis
+            weight: 0.12
+            phases:
+              - duration_s: [20.0, 30.0]
+                controller:                              # ★ FULLY PARALLEL & RANDOM
+                  - {type: random_line_velocity,
+                    velocity_range_mps: [-1.5, 1.5],
+                    resample_interval_s: 1.5}
+                  - {type: random_attitude_command,
+                    amplitude_deg: [0, 20],
+                    resample_interval_s: 1.0}
+                  - {type: random_yaw_command,
+                    rate_range_radps: [-0.6, 0.6],
+                    resample_interval_s: 2.0}
+                wind:
+                  type: random_multi
+                  allowed_types: [constant, step, sinusoidal, gust, dryden]
+                  magnitude_range_N: [0.0, 6.0]
+                  direction_change_interval_s: [3.0, 6.0]
+                  type_change_interval_s: [5.0, 10.0]
+
+        # ── Paired scenarios ──────────────────────────────────
+        paired_scenarios:
+          - name: physics_comparison
+            members: [same_sequence_nominal_physics, same_sequence_perturbed_physics]
+            shared:
+              - command_sequence
+              - wind_sequence
+              - total_duration_s
+            pair_id_prefix: "physics_nominal_vs_perturbed"
+            # Physics modifiers differ by design:
+            #   nominal  → mass_scale=1.0, inertia_scale=1.0, drag_scale=1.0
+            #   perturbed → sampled from respective ranges
+
+          - name: intensity_comparison
+            members: [gentle_maneuver_sequence, aggressive_maneuver_sequence]
+            shared:
+              - command_sequence_shape
+              - wind_magnitude_N
+              - wind_direction
+            pair_id_prefix: "intensity_gentle_vs_aggressive"
+
+          - name: transition_comparison
+            members: [smooth_transition, abrupt_transition]
+            shared:
+              - endpoint_velocity
+              - endpoint_yaw
+              - wind_magnitude_N
+              - wind_direction
+            pair_id_prefix: "transition_smooth_vs_abrupt"
+
+        # ── Sampling policy ───────────────────────────────────
+        sampling:
+          guarantee_coverage: true
+          pairs_generated_together: true
+          enforce_parallel_requirement: true
+          # Every generated trajectory MUST have at least one phase
+          # with ≥2 controllers running in parallel. If a scenario's
+          # sampled instance violates this, the generator raises.
+
+        # ── Event logging specification ───────────────────────
+        event_log_spec:
+          format: "json_array_in_metadata"
+          fields: ["t", "type", "id", "params"]
+          event_types:
+            - "maneuver_start"
+            - "maneuver_end"
+            - "wind_change"
+            - "gust_start"
+            - "gust_end"
+            - "physics_perturbation"
+            - "recovery_begin"
+            - "recovery_end"
+          sample:
+            - {t: 0.0,   type: maneuver_start, id: "translate_forward",
+              params: {velocity_mps: 1.2, direction: [1, 0, 0]}}
+            - {t: 4.0,   type: maneuver_start, id: "yaw_90",
+              params: {target_rad: 1.5708, rate_class: moderate}}
+            - {t: 4.0,   type: wind_change, id: "wind_step",
+              params: {from_N: 2.0, to_N: 4.0}}
+            - {t: 9.0,   type: maneuver_end,  id: "yaw_90"}
+            - {t: 9.0,   type: maneuver_end,  id: "translate_forward"}
+            - {t: 9.0,   type: maneuver_start, id: "brake_to_zero"}
+            - {t: 13.0,  type: maneuver_end, id: "brake_to_zero"}
+            # Note: gust events logged as two entries (start + end) so
+            # downstream code can bracket the disturbance window.
+
+        # ── Expected composition ──────────────────────────────
+        report:
+          trajectory_count: 18
+          scenarios_present: 14
+          avg_duration_s: 30.0
+          total_steps: ~54000                 # 30 s × 100 Hz × 18
+          paired_pairs_generated: 3
+          parallel_phases_per_trajectory_min: 1
+          parallel_phases_per_trajectory_max: 3
+          maneuver_events_logged_min: 8       # per trajectory
+          maneuver_events_logged_max: 20
+
+          coverage:
+            hover_accel_decel_hover:      S1  (user example 1)
+            translate_yaw_continue:       S2  (user example 2)
+            accel_gust_correct_brake:     S3  (user example 3)
+            roll_pitch_while_translating: S4  (user example 4)
+            accel_yaw_decel_changing_wind: S5  (user example 5)
+            same_sequence_diff_physics:   S6a + S6b (user example 6, paired)
+            unexpected_gust_mid_maneuver: S7  (user example 7)
+            recovery_after_disturbance:   S8  (user "recovery behavior")
+            gentle_vs_aggressive:         S9a + S9b (user "maneuver intensity", paired)
+            smooth_vs_abrupt:             S10a + S10b (user "transition profile", paired)
+            random_multi_axis:            S11 (decorrelation workhorse)
+
+          # Non-redundancy assertion (checked post-generation)
+          non_redundancy_vs_other_modes:
+            each_scenario_has_parallel_phase: true
+            min_parallel_phases_per_trajectory: 1
+            # Scenarios that would have been single-controller have been
+            # merged into the corresponding primary mode instead:
+            #   single-controller translation → Mode 2
+            #   single-controller attitude    → Mode 5
+            #   single-controller yaw         → Mode 4
+
+      counterfactual: true
+
+
+  # ── Expected output summary (informational) ──────────────────
+  report:
+    expected_trajectories:
+      hover:         10      # 10 × 15 s  =   150 s
+      translation:   28      # 28 × 100 s =  2800 s
+      acceleration:  18      # 18 × 100 s =  1800 s
+      yaw:           12      # 12 × 100 s =  1200 s
+      attitude:      15      # 15 × 100 s =  1500 s
+      combined:      17      # 17 × 100 s =  1700 s
+      # counterfactual replays: 90 scripted trajectories × 2 = 180
+      # total trajectories written: 100 base + 90 replays = 190
+      # total simulation steps: ~ (100 × 100 × 100 Hz) ≈ 10^6 base
+      #                        + (90 × 100 × 100 Hz) ≈ 0.9 × 10^6 replay
+    storage_estimate_gb: 0.5    # 15 float32 columns × ~2M rows × 4 bytes

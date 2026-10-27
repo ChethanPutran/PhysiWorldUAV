@@ -1,0 +1,8 @@
+# Just replaces the entrypoint on top of the working snapshot.
+# Does NOT reinstall anything.
+FROM isaac-sim-novnc:snapshot-20261021-1137
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

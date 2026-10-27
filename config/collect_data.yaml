@@ -1,0 +1,67 @@
+# config/collect_data.yaml
+#
+# Configuration for OmniDrones data collection.
+# All values can be overridden from the command line.
+
+defaults:
+  - _self_
+
+# ── Experiment identity ───────────────────────────────────────────────
+experiment:
+  name: "wind_track_experiment"
+  seed: 42
+  description: "Collect drone trajectories under varied wind conditions."
+
+# ── Simulation ──────────────────────────────────────────────────────────
+simulation:
+  dt: 0.016                # Simulation timestep (seconds)
+  substeps: 1
+  headless: false          # Set to false to visualise via VNC
+  device: "cuda:0"
+  # PhysX workaround for setGlobalPose errors
+  gpu_max_num_partitions: 1
+
+# ── Environment / Task ──────────────────────────────────────────────────
+task:
+  name: "Track"
+  drone_model: "Hummingbird"
+  controller: "LeePositionController"
+  num_envs: 1
+  max_episode_length: 1000  # steps
+  reset_thres: 0.5
+
+# ── Wind disturbance ────────────────────────────────────────────────────
+wind:
+  # type: "none" | "constant" | "dryden" | "step"
+  type: "constant"
+
+  # Parameters for type "constant"
+  constant:
+    force_w: [2.0, 0.0, 0.0]   # World-frame force (Newtons)
+    torque_w: [0.0, 0.0, 0.0]  # World-frame torque (Nm)
+
+  # Parameters for type "dryden" (turbulence)
+  dryden:
+    sigma: [0.5, 0.5, 0.2]     # RMS turbulence intensity per axis (m/s)
+    length_scale: [100.0, 100.0, 50.0]  # Length scales (m)
+    # The force is computed from relative airspeed and drag coefficients.
+    # For simplicity, this script applies a direct force proportional to sigma.
+
+  # Parameters for type "step" (sudden gust)
+  step:
+    magnitude: 5.0            # Force magnitude (N)
+    direction: [1.0, 0.0, 0.0] # Unit vector
+    step_time: 0.5            # Seconds after which the gust is applied
+
+# ── Data collection ─────────────────────────────────────────────────────
+collection:
+  num_trajectories: 10        # Number of runs to generate
+  steps_per_trajectory: 500   # Length of each trajectory
+  output_dir: "/datasets/wind_experiments"
+  save_camera: false          # Set to true only when camera is enabled
+
+  # Which sensors to log
+  log_imu: true               # Accelerometer & gyroscope (if available)
+  log_state: true             # Position, velocity, orientation, angular velocity
+  log_actions: true
+  log_wind: true

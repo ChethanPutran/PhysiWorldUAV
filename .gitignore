@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+omnidrones_env
+OmniDrones
+IsaacLab
+scripts/outputs
+.env
