@@ -37,10 +37,7 @@ aerodynamics:
   
 # ── Altitude hold ─────────────────────────────────────────────
 hover:
-  target_z: 1.5
-  kp_z: 3.0
-  kd_z: 2.0
-
+  position: [0.0, 0.0, 1.5]
 # ── Wind disturbance ─────────────────────────────────────────
 # General wind velocity ranges
 # Wind speed	General interpretation	Simulation use

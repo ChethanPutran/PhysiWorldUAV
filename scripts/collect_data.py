@@ -172,7 +172,7 @@ def _log_step(traj, env, step, action, wind_force):
 
     # ---- state ----
     
-     = drone.get_state()  # returns a tensor
+    state = drone.get_state()  # returns a tensor
     # state layout (from OmniDrones docs):
     # [pos(3), quat(4), lin_vel(3), ang_vel(3), heading(3), up(3), throttle(1), ...]
     state_np = state.cpu().numpy().squeeze()  # remove batch dims

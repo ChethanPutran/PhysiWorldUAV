@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive 3D Wind Vector Field Simulator</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Three.js and OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- js-yaml -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+  <style>
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(71, 85, 105, 1); }
+    
+    /* Glassmorphic UI */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    /* Number input spin hide */
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type=number] { -moz-appearance: textfield; }
+
+    /* Custom range slider styling */
+    input[type=range] {
+      accent-color: #3b82f6;
+    }
+  </style>
+</head>
+<body class="h-full overflow-hidden font-sans select-none flex flex-col">
+
+  <!-- Top Header Bar -->
+  <header class="h-14 glass-panel z-20 flex items-center justify-between px-4 border-b border-slate-800 shrink-0">
+    <div class="flex items-center space-x-3">
+      <div class="p-2 bg-blue-600/20 text-blue-400 rounded-lg border border-blue-500/30">
+        <i data-lucide="wind" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold bg-gradient-to-r from-blue-400 via-teal-300 to-indigo-400 bg-clip-text text-transparent">
+          3D Wind Velocity Field Simulator
+        </h1>
+        <p class="text-xs text-slate-400">Dynamic Atmospheric Profile & Spatial Gradient Engine</p>
+      </div>
+    </div>
+
+    <!-- Playback Control Center -->
+    <div class="flex items-center space-x-3 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
+      <button id="btn-play-pause" class="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors flex items-center justify-center">
+        <i id="icon-play-pause" data-lucide="pause" class="w-4 h-4"></i>
+      </button>
+      <button id="btn-reset" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors" title="Reset Simulation Time">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+      </button>
+      
+      <div class="h-4 w-px bg-slate-800"></div>
+
+      <div class="flex items-center space-x-2 text-xs font-mono">
+        <span class="text-slate-400">Time:</span>
+        <span id="display-sim-time" class="text-blue-400 font-semibold w-16">0.00 s</span>
+      </div>
+
+      <div class="h-4 w-px bg-slate-800"></div>
+
+      <div class="flex items-center space-x-2 text-xs">
+        <span class="text-slate-400">Speed:</span>
+        <input type="range" id="input-time-speed" min="0.1" max="5.0" step="0.1" value="1.0" class="w-16 h-1.5 bg-slate-700 rounded-lg cursor-pointer">
+        <span id="display-speed-val" class="text-slate-300 font-mono w-8">1.0x</span>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex items-center space-x-2">
+      <button id="btn-yaml-modal" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center space-x-1.5">
+        <i data-lucide="code" class="w-3.5 h-3.5 text-teal-400"></i>
+        <span>YAML Config</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Viewport & UI Container -->
+  <div class="relative flex-1 w-full overflow-hidden flex">
+    
+    <!-- 3D Viewport Canvas Container -->
+    <div id="canvas-container" class="absolute inset-0 bg-slate-950"></div>
+
+    <!-- Floating HUD Overlay top right -->
+    <div class="absolute top-4 right-4 pointer-events-none z-10 flex flex-col space-y-2 text-xs">
+      <div class="glass-panel p-3 rounded-xl border border-slate-800 text-slate-300 pointer-events-auto shadow-xl space-y-1 min-w-[180px]">
+        <div class="flex items-center justify-between text-slate-400 pb-1 border-b border-slate-800 font-medium">
+          <span class="flex items-center space-x-1">
+            <i data-lucide="navigation" class="w-3.5 h-3.5 text-blue-400"></i>
+            <span>Probe Velocity</span>
+          </span>
+          <span id="probe-active-badge" class="px-1.5 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/30">Active</span>
+        </div>
+        <div class="font-mono pt-1 text-slate-200">
+          <div class="flex justify-between"><span>Pos (x,y,z):</span> <span id="probe-pos-val" class="text-slate-400">[0.0, 0.0, 1.5]</span></div>
+          <div class="flex justify-between"><span>Vel [u,v,w]:</span> <span id="probe-vel-val" class="text-teal-400 font-bold">[0.00, 0.00, 0.00]</span></div>
+          <div class="flex justify-between"><span>Speed:</span> <span id="probe-speed-val" class="text-blue-400 font-bold">0.00 m/s</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Left Control Panel Sidebar -->
+    <aside id="sidebar-panel" class="relative z-10 w-96 h-full glass-panel border-r border-slate-800 flex flex-col transition-all duration-300">
+      <!-- Tabs Bar -->
+      <div class="flex border-b border-slate-800 bg-slate-900/50 text-xs font-medium text-slate-400">
+        <button data-tab="tab-profile" class="tab-btn flex-1 py-3 px-2 text-center border-b-2 border-blue-500 text-blue-400 font-semibold transition flex flex-col items-center gap-1">
+          <i data-lucide="sliders" class="w-4 h-4"></i> Profiles
+        </button>
+        <button data-tab="tab-spatial" class="tab-btn flex-1 py-3 px-2 text-center border-b-2 border-transparent hover:text-slate-200 transition flex flex-col items-center gap-1">
+          <i data-lucide="grid" class="w-4 h-4"></i> Spatial
+        </button>
+        <button data-tab="tab-visuals" class="tab-btn flex-1 py-3 px-2 text-center border-b-2 border-transparent hover:text-slate-200 transition flex flex-col items-center gap-1">
+          <i data-lucide="eye" class="w-4 h-4"></i> Display
+        </button>
+        <button data-tab="tab-charts" class="tab-btn flex-1 py-3 px-2 text-center border-b-2 border-transparent hover:text-slate-200 transition flex flex-col items-center gap-1">
+          <i data-lucide="line-chart" class="w-4 h-4"></i> Analytics
+        </button>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
+        
+        <!-- TAB 1: PROFILE & GUST CONFIG -->
+        <div id="tab-profile" class="tab-content space-y-4">
+          <!-- Background Steady Wind -->
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-2">
+            <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+              <i data-lucide="compass" class="w-4 h-4 text-blue-400"></i>
+              <span>Steady Background Wind (m/s)</span>
+            </h3>
+            <div class="grid grid-cols-3 gap-2 pt-1">
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">X Velocity (u)</label>
+                <input type="number" step="0.1" id="cfg-steady-x" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:border-blue-500 outline-none">
+              </div>
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">Y Velocity (v)</label>
+                <input type="number" step="0.1" id="cfg-steady-y" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:border-blue-500 outline-none">
+              </div>
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">Z Velocity (w)</label>
+                <input type="number" step="0.1" id="cfg-steady-z" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:border-blue-500 outline-none">
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Profile Type Selector -->
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                <i data-lucide="activity" class="w-4 h-4 text-teal-400"></i>
+                <span>Time-Dependent Profile</span>
+              </h3>
+            </div>
+            
+            <select id="cfg-profile-type" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:border-teal-500 outline-none">
+              <option value="none">None (Steady Only)</option>
+              <option value="constant">Constant</option>
+              <option value="step">Step Change</option>
+              <option value="sinusoidal">Sinusoidal</option>
+              <option value="gust">Discrete Gust</option>
+              <option value="dryden">Dryden Turbulence</option>
+              <option value="random">Random Noise</option>
+            </select>
+
+            <!-- Dynamic Sub-Forms for Profile Parameters -->
+            <div id="profile-params-container" class="pt-2 border-t border-slate-800/80">
+              
+              <!-- CONSTANT -->
+              <div id="params-constant" class="profile-param-group space-y-2 hidden">
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="text-[10px] text-slate-400">Magnitude (m/s)</label>
+                    <input type="number" step="0.1" id="cfg-const-mag" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Direction [X, Y, Z]</label>
+                    <input type="text" id="cfg-const-dir" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-[11px]" placeholder="0, 1, 0">
+                  </div>
+                </div>
+              </div>
+
+              <!-- STEP -->
+              <div id="params-step" class="profile-param-group space-y-2 hidden">
+                <div class="grid grid-cols-3 gap-2">
+                  <div>
+                    <label class="text-[10px] text-slate-400">Magnitude</label>
+                    <input type="number" step="0.1" id="cfg-step-mag" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Step Time (s)</label>
+                    <input type="number" step="0.5" id="cfg-step-time" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Direction</label>
+                    <input type="text" id="cfg-step-dir" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-[11px]">
+                  </div>
+                </div>
+              </div>
+
+              <!-- SINUSOIDAL -->
+              <div id="params-sinusoidal" class="profile-param-group space-y-2 hidden">
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="text-[10px] text-slate-400">Amplitude (m/s)</label>
+                    <input type="number" step="0.1" id="cfg-sin-amp" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Frequency (Hz)</label>
+                    <input type="number" step="0.05" id="cfg-sin-freq" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Offset (m/s)</label>
+                    <input type="number" step="0.1" id="cfg-sin-offset" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Phase (rad)</label>
+                    <input type="number" step="0.1" id="cfg-sin-phase" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400">Direction Vector [x, y, z]</label>
+                  <input type="text" id="cfg-sin-dir" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-[11px]">
+                </div>
+              </div>
+
+              <!-- GUST -->
+              <div id="params-gust" class="profile-param-group space-y-2 hidden">
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="text-[10px] text-slate-400">Magnitude (m/s)</label>
+                    <input type="number" step="0.1" id="cfg-gust-mag" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Start Time (s)</label>
+                    <input type="number" step="0.5" id="cfg-gust-start" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Duration (s)</label>
+                    <input type="number" step="0.5" id="cfg-gust-dur" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Direction Vector</label>
+                    <input type="text" id="cfg-gust-dir" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-[11px]">
+                  </div>
+                </div>
+              </div>
+
+              <!-- DRYDEN -->
+              <div id="params-dryden" class="profile-param-group space-y-2 hidden">
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="text-[10px] text-slate-400">Sigma σ (Intensity)</label>
+                    <input type="number" step="0.05" id="cfg-dryden-sigma" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-slate-400">Tau τ (Time scale s)</label>
+                    <input type="number" step="0.1" id="cfg-dryden-tau" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                  </div>
+                </div>
+              </div>
+
+              <!-- RANDOM -->
+              <div id="params-random" class="profile-param-group space-y-2 hidden">
+                <div>
+                  <label class="text-[10px] text-slate-400">Sigma σ (Noise StdDev)</label>
+                  <input type="number" step="0.05" id="cfg-random-sigma" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Independent Gust Overlay -->
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-slate-200 flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" id="cfg-gust-overlay-enabled" class="rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-0 w-4 h-4">
+                <span>Independent Gust Overlay</span>
+              </label>
+              <span class="text-[10px] text-slate-400">1-cos profile</span>
+            </div>
+
+            <div id="gust-overlay-controls" class="space-y-2 pt-1">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[10px] text-slate-400">Amplitude (m/s)</label>
+                  <input type="number" step="0.1" id="cfg-overlay-amp" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400">Start Time (s)</label>
+                  <input type="number" step="0.5" id="cfg-overlay-start" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400">Duration (s)</label>
+                  <input type="number" step="0.5" id="cfg-overlay-dur" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1">
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400">Direction Vector</label>
+                  <input type="text" id="cfg-overlay-dir" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-[11px]">
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- TAB 2: SPATIAL GRADIENTS -->
+        <div id="tab-spatial" class="tab-content space-y-4 hidden">
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-slate-200 flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" id="cfg-spatial-enabled" class="rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-0 w-4 h-4">
+                <span>Enable Spatial Gradients</span>
+              </label>
+            </div>
+
+            <div id="spatial-sub-controls" class="space-y-3">
+              <!-- Reference Position -->
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">Reference Position [x0, y0, z0] (m)</label>
+                <div class="grid grid-cols-3 gap-2">
+                  <input type="number" step="0.1" id="cfg-ref-x" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+                  <input type="number" step="0.1" id="cfg-ref-y" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+                  <input type="number" step="0.1" id="cfg-ref-z" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+                </div>
+              </div>
+
+              <!-- Mode Switch -->
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">Gradient Mode</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <button id="btn-mode-diagonal" class="py-1.5 px-3 rounded-lg border border-blue-500 bg-blue-600/20 text-blue-400 font-semibold text-center transition">
+                    Diagonal
+                  </button>
+                  <button id="btn-mode-matrix" class="py-1.5 px-3 rounded-lg border border-slate-700 bg-slate-950 text-slate-400 font-semibold text-center transition">
+                    Full Matrix (3x3)
+                  </button>
+                </div>
+              </div>
+
+              <!-- Diagonal Gradient -->
+              <div id="spatial-diagonal-container" class="space-y-1">
+                <label class="text-[10px] text-slate-400 block">Gradient Rate [(du/dx), (dv/dy), (dw/dz)] (m/s per m)</label>
+                <div class="grid grid-cols-3 gap-2">
+                  <input type="number" step="0.05" id="cfg-diag-x" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono">
+                  <input type="number" step="0.05" id="cfg-diag-y" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono">
+                  <input type="number" step="0.05" id="cfg-diag-z" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono">
+                </div>
+              </div>
+
+              <!-- Matrix Gradient -->
+              <div id="spatial-matrix-container" class="space-y-2 hidden">
+                <label class="text-[10px] text-slate-400 block">Gradient Matrix $\nabla \mathbf{u}$ (Rows: Velocity $u,v,w$; Cols: Position $x,y,z$)</label>
+                <div class="grid grid-cols-3 gap-1.5 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                  <!-- Row 0: du/dx, du/dy, du/dz -->
+                  <input type="number" step="0.05" id="m00" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  <input type="number" step="0.05" id="m01" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  <input type="number" step="0.05" id="m02" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  
+                  <!-- Row 1: dv/dx, dv/dy, dv/dz -->
+                  <input type="number" step="0.05" id="m10" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  <input type="number" step="0.05" id="m11" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  <input type="number" step="0.05" id="m12" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+
+                  <!-- Row 2: dw/dx, dw/dy, dw/dz -->
+                  <input type="number" step="0.05" id="m20" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  <input type="number" step="0.05" id="m21" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                  <input type="number" step="0.05" id="m22" class="bg-slate-900 border border-slate-700 rounded p-1 text-center font-mono">
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: VISUALIZATION SETTINGS -->
+        <div id="tab-visuals" class="tab-content space-y-4 hidden">
+          
+          <!-- Vector Arrows -->
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+            <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+              <i data-lucide="arrow-right" class="w-4 h-4 text-blue-400"></i>
+              <span>Vector Arrow Configuration</span>
+            </h3>
+
+            <div class="space-y-2">
+              <div>
+                <div class="flex justify-between text-slate-400 mb-1">
+                  <span>Grid Resolution (NxNxN)</span>
+                  <span id="disp-grid-density-val" class="font-mono text-slate-200">5 x 5 x 5</span>
+                </div>
+                <input type="range" id="cfg-grid-density" min="3" max="9" step="1" value="5" class="w-full">
+              </div>
+
+              <div>
+                <div class="flex justify-between text-slate-400 mb-1">
+                  <span>Arrow Length Scale</span>
+                  <span id="disp-arrow-scale-val" class="font-mono text-slate-200">0.4x</span>
+                </div>
+                <input type="range" id="cfg-arrow-scale" min="0.05" max="1.5" step="0.05" value="0.4" class="w-full">
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[10px] text-slate-400">Head Length Ratio</label>
+                  <input type="number" step="0.05" id="cfg-head-length" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1" value="0.25">
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400">Head Width Ratio</label>
+                  <input type="number" step="0.05" id="cfg-head-width" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1" value="0.20">
+                </div>
+              </div>
+
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">Color Map</label>
+                <select id="cfg-colormap" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200">
+                  <option value="turbo">Turbo / Rainbow</option>
+                  <option value="viridis">Viridis</option>
+                  <option value="coolwarm">Cool-Warm</option>
+                  <option value="cyan-emerald">Cyan to Emerald</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Particles / Streamlines -->
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-slate-200 flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" id="cfg-particles-enabled" class="rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-0 w-4 h-4" checked>
+                <span>Particle Streamlines Flow</span>
+              </label>
+            </div>
+
+            <div class="space-y-2">
+              <div>
+                <div class="flex justify-between text-slate-400 mb-1">
+                  <span>Particle Count</span>
+                  <span id="disp-particle-count-val" class="font-mono text-slate-200">800</span>
+                </div>
+                <input type="range" id="cfg-particle-count" min="100" max="3000" step="100" value="800" class="w-full">
+              </div>
+
+              <div>
+                <div class="flex justify-between text-slate-400 mb-1">
+                  <span>Particle Flow Speed Factor</span>
+                  <span id="disp-particle-speed-val" class="font-mono text-slate-200">1.0</span>
+                </div>
+                <input type="range" id="cfg-particle-speed" min="0.1" max="3.0" step="0.1" value="1.0" class="w-full">
+              </div>
+
+              <div>
+                <div class="flex justify-between text-slate-400 mb-1">
+                  <span>Particle Size</span>
+                  <span id="disp-particle-size-val" class="font-mono text-slate-200">0.08</span>
+                </div>
+                <input type="range" id="cfg-particle-size" min="0.02" max="0.3" step="0.01" value="0.08" class="w-full">
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- TAB 4: ANALYTICS & CHARTS -->
+        <div id="tab-charts" class="tab-content space-y-4 hidden">
+          <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+            <h3 class="font-bold text-slate-200 flex items-center justify-between">
+              <span class="flex items-center space-x-1.5">
+                <i data-lucide="trending-up" class="w-4 h-4 text-emerald-400"></i>
+                <span>Probe Speed History</span>
+              </span>
+              <span class="text-[10px] text-slate-400">Last 15s</span>
+            </h3>
+            <div class="w-full h-44 bg-slate-950 p-2 rounded-lg border border-slate-800">
+              <canvas id="speedChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Interactive Probe Control Bar at bottom of viewport -->
+    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 glass-panel px-4 py-2 rounded-2xl border border-slate-800 flex items-center space-x-4 text-xs">
+      <div class="flex items-center space-x-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-semibold text-slate-200">Probe Position:</span>
+      </div>
+      <div class="flex items-center space-x-2 font-mono">
+        <label class="text-slate-400">X:</label>
+        <input type="number" step="0.5" id="probe-x-input" class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-slate-200">
+        <label class="text-slate-400">Y:</label>
+        <input type="number" step="0.5" id="probe-y-input" class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-slate-200">
+        <label class="text-slate-400">Z:</label>
+        <input type="number" step="0.5" id="probe-z-input" class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-slate-200">
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal for YAML Export/Import -->
+  <div id="yaml-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="glass-panel w-full max-w-2xl rounded-2xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+        <h3 class="font-bold text-slate-100 flex items-center space-x-2">
+          <i data-lucide="file-code" class="w-5 h-5 text-teal-400"></i>
+          <span>YAML Configuration Inspector</span>
+        </h3>
+        <button id="btn-close-yaml" class="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="p-4 flex-1 overflow-hidden flex flex-col space-y-2">
+        <p class="text-xs text-slate-400">Edit or view the full wind configuration model in standard YAML format:</p>
+        <textarea id="yaml-textarea" class="flex-1 w-full bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs text-teal-300 focus:outline-none focus:border-teal-500 resize-none"></textarea>
+      </div>
+      <div class="p-4 border-t border-slate-800 bg-slate-900/40 flex items-center justify-between">
+        <button id="btn-copy-yaml" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center space-x-1.5">
+          <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+          <span>Copy to Clipboard</span>
+        </button>
+        <div class="flex space-x-2">
+          <button id="btn-apply-yaml" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition">
+            Apply Configuration
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Default Simulation Configuration Model (Matching user specification exactly)
+    const windConfig = {
+      steady_wind_xyz: [2.0, 0.0, 0.0],
+      type: "none",
+      gust_enabled: false,
+      gust_start_s: 3.0,
+      gust_duration_s: 2.0,
+      gust_amplitude_mps: 1.5,
+      gust_direction: [1.0, 0.0, 0.0],
+      spatial: {
+        enabled: true,
+        gradient_mode: "matrix", // "diagonal" | "matrix"
+        gradient_xyz_per_m: [0.5, 0.0, 0.0],
+        gradient_matrix_per_m: [
+          [0.5, 0.0, 0.0],
+          [0.2, 0.3, 0.0],
+          [0.0, 0.1, 0.0]
+        ],
+        reference_position_xyz: [0.0, 0.0, 1.5]
+      },
+      constant: {
+        magnitude: 1.0,
+        direction: [0.0, 1.0, 0.0]
+      },
+      step: {
+        magnitude: 2.0,
+        direction: [0.0, 1.0, 0.0],
+        step_time: 5.0
+      },
+      sinusoidal: {
+        amplitude: 1.0,
+        direction: [0.0, 1.0, 0.0],
+        frequency_hz: 0.2,
+        offset: 0.0,
+        phase_rad: 0.0
+      },
+      gust: {
+        magnitude: 2.0,
+        direction: [0.0, 1.0, 0.0],
+        start_time: 3.0,
+        duration: 1.0
+      },
+      dryden: {
+        sigma: 0.3,
+        tau_seconds: 1.0
+      },
+      random: {
+        sigma: 0.5
+      }
+    };
+
+    // Visual Settings State
+    const visualConfig = {
+      gridDensity: 5,
+      arrowScale: 0.4,
+      headLength: 0.25,
+      headWidth: 0.20,
+      colorMap: 'turbo',
+      particlesEnabled: true,
+      particleCount: 800,
+      particleSpeed: 1.0,
+      particleSize: 0.08,
+      domainSize: 10.0 // +/- 5 meters along each axis
+    };
+
+    // Simulation State
+    let isPlaying = true;
+    let simTime = 0.0;
+    let timeSpeed = 1.0;
+    let lastTimestamp = performance.now();
+
+    // Probe State
+    const probePos = { x: 0.0, y: 0.0, z: 1.5 };
+
+    // Dryden filter state dynamic variables
+    const drydenState = { u: 0.0, v: 0.0, w: 0.0, lastT: 0.0 };
+    const randomState = { u: 0.0, v: 0.0, w: 0.0, lastT: 0.0 };
+
+    // Vector Normalize Helper
+    function normalizeVec3(v) {
+      const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+      if (len === 0) return [0, 0, 0];
+      return [v[0]/len, v[1]/len, v[2]/len];
+    }
+
+    // --- WIND MATHEMATICAL ENGINE ---
+    function evaluateWindVelocity(x, y, z, time) {
+      // 1. Steady Background Wind
+      let u = windConfig.steady_wind_xyz[0];
+      let v = windConfig.steady_wind_xyz[1];
+      let w = windConfig.steady_wind_xyz[2];
+
+      // 2. Dynamic Time-Dependent Profile Type
+      const type = windConfig.type;
+      let pVec = [0, 0, 0];
+
+      if (type === "constant") {
+        const d = normalizeVec3(windConfig.constant.direction);
+        const mag = windConfig.constant.magnitude;
+        pVec = [d[0]*mag, d[1]*mag, d[2]*mag];
+      } 
+      else if (type === "step") {
+        if (time >= windConfig.step.step_time) {
+          const d = normalizeVec3(windConfig.step.direction);
+          const mag = windConfig.step.magnitude;
+          pVec = [d[0]*mag, d[1]*mag, d[2]*mag];
+        }
+      } 
+      else if (type === "sinusoidal") {
+        const sinCfg = windConfig.sinusoidal;
+        const d = normalizeVec3(sinCfg.direction);
+        const val = sinCfg.offset + sinCfg.amplitude * Math.sin(2.0 * Math.PI * sinCfg.frequency_hz * time + sinCfg.phase_rad);
+        pVec = [d[0]*val, d[1]*val, d[2]*val];
+      } 
+      else if (type === "gust") {
+        const gCfg = windConfig.gust;
+        if (time >= gCfg.start_time && time <= (gCfg.start_time + gCfg.duration)) {
+          const progress = (time - gCfg.start_time) / gCfg.duration;
+          // Smooth 1 - cos gust profile
+          const factor = 0.5 * (1.0 - Math.cos(2.0 * Math.PI * progress));
+          const d = normalizeVec3(gCfg.direction);
+          const mag = gCfg.magnitude * factor;
+          pVec = [d[0]*mag, d[1]*mag, d[2]*mag];
+        }
+      }
+      else if (type === "dryden") {
+        // Continuous Dryden filter approximation
+        const sigma = windConfig.dryden.sigma;
+        const tau = Math.max(0.01, windConfig.dryden.tau_seconds);
+        const dt = Math.min(0.05, Math.max(0.001, time - drydenState.lastT));
+        if (time > drydenState.lastT) {
+          const alpha = Math.exp(-dt / tau);
+          const noiseScale = sigma * Math.sqrt(1.0 - alpha * alpha);
+          drydenState.u = drydenState.u * alpha + (Math.random() * 2 - 1) * noiseScale;
+          drydenState.v = drydenState.v * alpha + (Math.random() * 2 - 1) * noiseScale;
+          drydenState.w = drydenState.w * alpha + (Math.random() * 2 - 1) * noiseScale;
+          drydenState.lastT = time;
+        }
+        pVec = [drydenState.u, drydenState.v, drydenState.w];
+      }
+      else if (type === "random") {
+        const sigma = windConfig.random.sigma;
+        const dt = Math.min(0.05, Math.max(0.001, time - randomState.lastT));
+        if (time > randomState.lastT) {
+          randomState.u = (Math.random() * 2 - 1) * sigma;
+          randomState.v = (Math.random() * 2 - 1) * sigma;
+          randomState.w = (Math.random() * 2 - 1) * sigma;
+          randomState.lastT = time;
+        }
+        pVec = [randomState.u, randomState.v, randomState.w];
+      }
+
+      u += pVec[0];
+      v += pVec[1];
+      w += pVec[2];
+
+      // 3. Gust Overlay (Independent)
+      if (windConfig.gust_enabled) {
+        const gStart = windConfig.gust_start_s;
+        const gDur = windConfig.gust_duration_s;
+        if (time >= gStart && time <= (gStart + gDur)) {
+          const progress = (time - gStart) / gDur;
+          const factor = 0.5 * (1.0 - Math.cos(2.0 * Math.PI * progress));
+          const d = normalizeVec3(windConfig.gust_direction);
+          const mag = windConfig.gust_amplitude_mps * factor;
+          u += d[0] * mag;
+          v += d[1] * mag;
+          w += d[2] * mag;
+        }
+      }
+
+      // 4. Spatial Gradients
+      if (windConfig.spatial && windConfig.spatial.enabled) {
+        const ref = windConfig.spatial.reference_position_xyz;
+        const dx = x - ref[0];
+        const dy = y - ref[1];
+        const dz = z - ref[2];
+
+        if (windConfig.spatial.gradient_mode === "diagonal") {
+          const diag = windConfig.spatial.gradient_xyz_per_m;
+          u += diag[0] * dx;
+          v += diag[1] * dy;
+          w += diag[2] * dz;
+        } else if (windConfig.spatial.gradient_mode === "matrix") {
+          const M = windConfig.spatial.gradient_matrix_per_m;
+          u += M[0][0]*dx + M[0][1]*dy + M[0][2]*dz;
+          v += M[1][0]*dx + M[1][1]*dy + M[1][2]*dz;
+          w += M[2][0]*dx + M[2][1]*dy + M[2][2]*dz;
+        }
+      }
+
+      return [u, v, w];
+    }
+
+    // Color Maps Helper
+    function getColorForMagnitude(mag, minMag = 0.0, maxMag = 8.0) {
+      const t = Math.min(1.0, Math.max(0.0, (mag - minMag) / (maxMag - minMag)));
+      const color = new THREE.Color();
+
+      if (visualConfig.colorMap === 'viridis') {
+        // Viridis approximation
+        color.setRGB(
+          0.28 + 0.70 * t - 0.5 * t * t,
+          0.15 + 0.80 * t,
+          0.47 + 0.10 * t - 0.5 * t * t
+        );
+      } else if (visualConfig.colorMap === 'coolwarm') {
+        color.setHSL(0.6 * (1.0 - t), 0.8, 0.5);
+      } else if (visualConfig.colorMap === 'cyan-emerald') {
+        color.setRGB(0.0, 0.4 + 0.6*t, 0.6 + 0.4*(1.0-t));
+      } else {
+        // Turbo / Rainbow
+        color.setHSL((1.0 - t) * 0.7, 1.0, 0.5);
+      }
+      return color;
+    }
+
+    // --- THREE.JS GRAPHICS INITIALIZATION ---
+    let scene, camera, renderer, controls;
+    let arrowGridGroup, particleSystem, probeMesh;
+    let particlePositions, particleVelocities, particleLifes;
+
+    function initThree() {
+      const container = document.getElementById('canvas-container');
+      
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x090d16);
+
+      camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+      camera.position.set(12, 10, 15);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+
+      // Lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(10, 20, 15);
+      scene.add(dirLight);
+
+      // Environment helpers
+      const gridHelper = new THREE.GridHelper(12, 12, 0x334155, 0x1e293b);
+      gridHelper.position.y = 0;
+      scene.add(gridHelper);
+
+      const axesHelper = new THREE.AxesHelper(2);
+      scene.add(axesHelper);
+
+      // Vector Arrow Group
+      arrowGridGroup = new THREE.Group();
+      scene.add(arrowGridGroup);
+
+      // Interactive Probe Sphere
+      const probeGeo = new THREE.SphereGeometry(0.25, 32, 32);
+      const probeMat = new THREE.MeshStandardMaterial({ 
+        color: 0x10b981, 
+        emissive: 0x059669, 
+        emissiveIntensity: 0.5,
+        roughness: 0.2, 
+        metalness: 0.8 
+      });
+      probeMesh = new THREE.Mesh(probeGeo, probeMat);
+      scene.add(probeMesh);
+
+      // Probe ring indicator
+      const ringGeo = new THREE.RingGeometry(0.35, 0.4, 32);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0x34d399, side: THREE.DoubleSide });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI / 2;
+      probeMesh.add(ringMesh);
+
+      // Build initial visual elements
+      rebuildArrowGrid();
+      initParticleSystem();
+
+      // Drag controls for probe sphere
+      initProbeInteraction();
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    // --- ARROW GRID SYSTEM ---
+    function rebuildArrowGrid() {
+      // Clear existing
+      while (arrowGridGroup.children.length > 0) {
+        const obj = arrowGridGroup.children.pop();
+        if (obj.geometry) obj.geometry.dispose();
+      }
+
+      const N = visualConfig.gridDensity;
+      const L = visualConfig.domainSize;
+      const step = L / (N - 1);
+      const halfL = L / 2;
+
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          for (let k = 0; k < N; k++) {
+            const px = -halfL + i * step;
+            const py = 0.2 + j * (L / N); // slightly above ground
+            const pz = -halfL + k * step;
+
+            const dir = new THREE.Vector3(1, 0, 0);
+            const origin = new THREE.Vector3(px, py, pz);
+            const arrow = new THREE.ArrowHelper(
+              dir,
+              origin,
+              1,
+              0x3b82f6,
+              1,
+              1
+            );
+            arrow.userData = { pos: [px, py, pz] };
+            arrowGridGroup.add(arrow);
+          }
+        }
+      }
+    }
+
+    function updateArrowGrid() {
+      const scaleFactor = visualConfig.arrowScale;
+      const headL = visualConfig.headLength;
+      const headW = visualConfig.headWidth;
+
+      arrowGridGroup.children.forEach(arrow => {
+        const [x, y, z] = arrow.userData.pos;
+        const [u, v, w] = evaluateWindVelocity(x, y, z, simTime);
+        const speed = Math.sqrt(u*u + v*v + w*w);
+
+        if (speed > 0.001) {
+          const dir = new THREE.Vector3(u / speed, v / speed, w / speed);
+          arrow.setDirection(dir);
+          const arrowLen = Math.max(0.1, speed * scaleFactor);
+          arrow.setLength(arrowLen, arrowLen * headL, arrowLen * headW);
+          arrow.setColor(getColorForMagnitude(speed));
+          arrow.visible = true;
+        } else {
+          arrow.visible = false;
+        }
+      });
+    }
+
+    // --- PARTICLE FLOW SYSTEM ---
+    function initParticleSystem() {
+      if (particleSystem) {
+        scene.remove(particleSystem);
+        particleSystem.geometry.dispose();
+        particleSystem.material.dispose();
+      }
+
+      const count = visualConfig.particleCount;
+      const geometry = new THREE.BufferGeometry();
+      particlePositions = new Float32Array(count * 3);
+      particleVelocities = new Float32Array(count * 3);
+      particleLifes = new Float32Array(count);
+
+      const L = visualConfig.domainSize;
+
+      for (let i = 0; i < count; i++) {
+        particlePositions[i*3] = (Math.random() - 0.5) * L;
+        particlePositions[i*3+1] = Math.random() * (L / 2) + 0.1;
+        particlePositions[i*3+2] = (Math.random() - 0.5) * L;
+        particleLifes[i] = Math.random() * 5.0;
+      }
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+
+      // Particle shader texture dot
+      const canvas = document.createElement('canvas');
+      canvas.width = 16; canvas.height = 16;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 16, 16);
+      const texture = new THREE.CanvasTexture(canvas);
+
+      const material = new THREE.PointsMaterial({
+        color: 0x38bdf8,
+        size: visualConfig.particleSize,
+        transparent: true,
+        opacity: 0.7,
+        map: texture,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+
+      particleSystem = new THREE.Points(geometry, material);
+      scene.add(particleSystem);
+    }
+
+    function updateParticleSystem(dt) {
+      if (!visualConfig.particlesEnabled) {
+        particleSystem.visible = false;
+        return;
+      }
+      particleSystem.visible = true;
+
+      const count = visualConfig.particleCount;
+      const L = visualConfig.domainSize;
+      const halfL = L / 2;
+      const speedMult = visualConfig.particleSpeed;
+
+      for (let i = 0; i < count; i++) {
+        let px = particlePositions[i*3];
+        let py = particlePositions[i*3+1];
+        let pz = particlePositions[i*3+2];
+
+        // RK2 Numerical Integration for velocity field
+        const [u1, v1, w1] = evaluateWindVelocity(px, py, pz, simTime);
+        const midX = px + 0.5 * u1 * dt * speedMult;
+        const midY = py + 0.5 * v1 * dt * speedMult;
+        const midZ = pz + 0.5 * w1 * dt * speedMult;
+
+        const [u2, v2, w2] = evaluateWindVelocity(midX, midY, midZ, simTime + 0.5*dt);
+
+        px += u2 * dt * speedMult;
+        py += v2 * dt * speedMult;
+        pz += w2 * dt * speedMult;
+
+        particleLifes[i] -= dt;
+
+        // Boundary respawn condition
+        if (particleLifes[i] <= 0 || Math.abs(px) > halfL || py < 0 || py > L || Math.abs(pz) > halfL) {
+          px = (Math.random() - 0.5) * L;
+          py = Math.random() * (L / 2) + 0.1;
+          pz = (Math.random() - 0.5) * L;
+          particleLifes[i] = 2.0 + Math.random() * 4.0;
+        }
+
+        particlePositions[i*3] = px;
+        particlePositions[i*3+1] = py;
+        particlePositions[i*3+2] = pz;
+      }
+
+      particleSystem.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // --- PROBE INTERACTION & DRAG ---
+    let isDraggingProbe = false;
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const dragPlane = new THREE.Plane();
+    const planeIntersect = new THREE.Vector3();
+
+    function initProbeInteraction() {
+      const container = document.getElementById('canvas-container');
+
+      container.addEventListener('mousedown', (e) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObject(probeMesh);
+
+        if (intersects.length > 0) {
+          isDraggingProbe = true;
+          controls.enabled = false;
+          dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), probeMesh.position);
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDraggingProbe) return;
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        if (raycaster.ray.intersectPlane(dragPlane, planeIntersect)) {
+          probePos.x = parseFloat(planeIntersect.x.toFixed(2));
+          probePos.y = Math.max(0.0, parseFloat(planeIntersect.y.toFixed(2)));
+          probePos.z = parseFloat(planeIntersect.z.toFixed(2));
+          syncProbeUI();
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDraggingProbe) {
+          isDraggingProbe = false;
+          controls.enabled = true;
+        }
+      });
+    }
+
+    function syncProbeUI() {
+      probeMesh.position.set(probePos.x, probePos.y, probePos.z);
+      document.getElementById('probe-x-input').value = probePos.x;
+      document.getElementById('probe-y-input').value = probePos.y;
+      document.getElementById('probe-z-input').value = probePos.z;
+    }
+
+    // --- CHART.JS REAL-TIME STREAMING ---
+    let speedChart;
+    const maxChartDataPoints = 80;
+    const chartTimeData = [];
+    const chartSpeedData = [];
+
+    function initChart() {
+      const ctx = document.getElementById('speedChart').getContext('2d');
+      speedChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartTimeData,
+          datasets: [{
+            label: 'Probe Wind Speed (m/s)',
+            data: chartSpeedData,
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            fill: true,
+            borderWidth: 2,
+            tension: 0.3,
+            pointRadius: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          scales: {
+            x: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#64748b', maxTicksLimit: 6 }
+            },
+            y: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#64748b' },
+              beginAtZero: true
+            }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+
+    function updateChart(time, speed) {
+      if (chartTimeData.length > maxChartDataPoints) {
+        chartTimeData.shift();
+        chartSpeedData.shift();
+      }
+      chartTimeData.push(time.toFixed(1) + 's');
+      chartSpeedData.push(speed);
+      speedChart.update('none');
+    }
+
+    // --- UI BINDINGS & CONTROLS SYNC ---
+    function bindUI() {
+      // Tab switching
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(b => {
+            b.classList.remove('border-blue-500', 'text-blue-400', 'font-semibold');
+            b.classList.add('border-transparent', 'text-slate-400');
+          });
+          btn.classList.remove('border-transparent', 'text-slate-400');
+          btn.classList.add('border-blue-500', 'text-blue-400', 'font-semibold');
+
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+          document.getElementById(btn.dataset.tab).classList.remove('hidden');
+        });
+      });
+
+      // Play / Pause / Reset
+      document.getElementById('btn-play-pause').addEventListener('click', () => {
+        isPlaying = !isPlaying;
+        document.getElementById('icon-play-pause').setAttribute('data-lucide', isPlaying ? 'pause' : 'play');
+        lucide.createIcons();
+      });
+
+      document.getElementById('btn-reset').addEventListener('click', () => {
+        simTime = 0.0;
+        chartTimeData.length = 0;
+        chartSpeedData.length = 0;
+        drydenState.u = drydenState.v = drydenState.w = 0;
+        drydenState.lastT = 0;
+      });
+
+      document.getElementById('input-time-speed').addEventListener('input', (e) => {
+        timeSpeed = parseFloat(e.target.value);
+        document.getElementById('display-speed-val').textContent = timeSpeed.toFixed(1) + 'x';
+      });
+
+      // Steady wind inputs
+      ['x', 'y', 'z'].forEach((axis, i) => {
+        const el = document.getElementById(`cfg-steady-${axis}`);
+        el.value = windConfig.steady_wind_xyz[i];
+        el.addEventListener('input', () => {
+          windConfig.steady_wind_xyz[i] = parseFloat(el.value) || 0;
+        });
+      });
+
+      // Dynamic profile type change
+      const profileSelect = document.getElementById('cfg-profile-type');
+      profileSelect.value = windConfig.type;
+      profileSelect.addEventListener('change', (e) => {
+        windConfig.type = e.target.value;
+        showProfileParamsGroup(windConfig.type);
+      });
+      showProfileParamsGroup(windConfig.type);
+
+      // Profile parameter form inputs
+      bindInput('cfg-const-mag', windConfig.constant, 'magnitude');
+      bindVecInput('cfg-const-dir', windConfig.constant, 'direction');
+
+      bindInput('cfg-step-mag', windConfig.step, 'magnitude');
+      bindInput('cfg-step-time', windConfig.step, 'step_time');
+      bindVecInput('cfg-step-dir', windConfig.step, 'direction');
+
+      bindInput('cfg-sin-amp', windConfig.sinusoidal, 'amplitude');
+      bindInput('cfg-sin-freq', windConfig.sinusoidal, 'frequency_hz');
+      bindInput('cfg-sin-offset', windConfig.sinusoidal, 'offset');
+      bindInput('cfg-sin-phase', windConfig.sinusoidal, 'phase_rad');
+      bindVecInput('cfg-sin-dir', windConfig.sinusoidal, 'direction');
+
+      bindInput('cfg-gust-mag', windConfig.gust, 'magnitude');
+      bindInput('cfg-gust-start', windConfig.gust, 'start_time');
+      bindInput('cfg-gust-dur', windConfig.gust, 'duration');
+      bindVecInput('cfg-gust-dir', windConfig.gust, 'direction');
+
+      bindInput('cfg-dryden-sigma', windConfig.dryden, 'sigma');
+      bindInput('cfg-dryden-tau', windConfig.dryden, 'tau_seconds');
+
+      bindInput('cfg-random-sigma', windConfig.random, 'sigma');
+
+      // Gust Overlay Toggle & Inputs
+      const overlayCheck = document.getElementById('cfg-gust-overlay-enabled');
+      overlayCheck.checked = windConfig.gust_enabled;
+      overlayCheck.addEventListener('change', (e) => { windConfig.gust_enabled = e.target.checked; });
+      bindInput('cfg-overlay-amp', windConfig, 'gust_amplitude_mps');
+      bindInput('cfg-overlay-start', windConfig, 'gust_start_s');
+      bindInput('cfg-overlay-dur', windConfig, 'gust_duration_s');
+      bindVecInput('cfg-overlay-dir', windConfig, 'gust_direction');
+
+      // Spatial Gradients Controls
+      const spatialCheck = document.getElementById('cfg-spatial-enabled');
+      spatialCheck.checked = windConfig.spatial.enabled;
+      spatialCheck.addEventListener('change', (e) => { windConfig.spatial.enabled = e.target.checked; });
+
+      ['x', 'y', 'z'].forEach((axis, i) => {
+        const el = document.getElementById(`cfg-ref-${axis}`);
+        el.value = windConfig.spatial.reference_position_xyz[i];
+        el.addEventListener('input', () => {
+          windConfig.spatial.reference_position_xyz[i] = parseFloat(el.value) || 0;
+        });
+      });
+
+      // Spatial Gradient Mode buttons
+      const btnDiag = document.getElementById('btn-mode-diagonal');
+      const btnMat = document.getElementById('btn-mode-matrix');
+      
+      function updateSpatialModeUI() {
+        if (windConfig.spatial.gradient_mode === 'diagonal') {
+          btnDiag.className = "py-1.5 px-3 rounded-lg border border-blue-500 bg-blue-600/20 text-blue-400 font-semibold text-center transition";
+          btnMat.className = "py-1.5 px-3 rounded-lg border border-slate-700 bg-slate-950 text-slate-400 font-semibold text-center transition";
+          document.getElementById('spatial-diagonal-container').classList.remove('hidden');
+          document.getElementById('spatial-matrix-container').classList.add('hidden');
+        } else {
+          btnMat.className = "py-1.5 px-3 rounded-lg border border-blue-500 bg-blue-600/20 text-blue-400 font-semibold text-center transition";
+          btnDiag.className = "py-1.5 px-3 rounded-lg border border-slate-700 bg-slate-950 text-slate-400 font-semibold text-center transition";
+          document.getElementById('spatial-matrix-container').classList.remove('hidden');
+          document.getElementById('spatial-diagonal-container').classList.add('hidden');
+        }
+      }
+
+      btnDiag.addEventListener('click', () => { windConfig.spatial.gradient_mode = 'diagonal'; updateSpatialModeUI(); });
+      btnMat.addEventListener('click', () => { windConfig.spatial.gradient_mode = 'matrix'; updateSpatialModeUI(); });
+      updateSpatialModeUI();
+
+      ['x', 'y', 'z'].forEach((axis, i) => {
+        const el = document.getElementById(`cfg-diag-${axis}`);
+        el.value = windConfig.spatial.gradient_xyz_per_m[i];
+        el.addEventListener('input', () => {
+          windConfig.spatial.gradient_xyz_per_m[i] = parseFloat(el.value) || 0;
+        });
+      });
+
+      // 3x3 Matrix Grid inputs
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          const el = document.getElementById(`m${r}${c}`);
+          el.value = windConfig.spatial.gradient_matrix_per_m[r][c];
+          el.addEventListener('input', () => {
+            windConfig.spatial.gradient_matrix_per_m[r][c] = parseFloat(el.value) || 0;
+          });
+        }
+      }
+
+      // Display & Visual Settings Inputs
+      const gridDensitySlider = document.getElementById('cfg-grid-density');
+      gridDensitySlider.addEventListener('input', (e) => {
+        visualConfig.gridDensity = parseInt(e.target.value);
+        document.getElementById('disp-grid-density-val').textContent = `${visualConfig.gridDensity} x ${visualConfig.gridDensity} x ${visualConfig.gridDensity}`;
+        rebuildArrowGrid();
+      });
+
+      const arrowScaleSlider = document.getElementById('cfg-arrow-scale');
+      arrowScaleSlider.addEventListener('input', (e) => {
+        visualConfig.arrowScale = parseFloat(e.target.value);
+        document.getElementById('disp-arrow-scale-val').textContent = visualConfig.arrowScale.toFixed(2) + 'x';
+      });
+
+      bindInput('cfg-head-length', visualConfig, 'headLength');
+      bindInput('cfg-head-width', visualConfig, 'headWidth');
+
+      document.getElementById('cfg-colormap').addEventListener('change', (e) => {
+        visualConfig.colorMap = e.target.value;
+      });
+
+      // Particle Controls
+      document.getElementById('cfg-particles-enabled').addEventListener('change', (e) => {
+        visualConfig.particlesEnabled = e.target.checked;
+      });
+
+      document.getElementById('cfg-particle-count').addEventListener('input', (e) => {
+        visualConfig.particleCount = parseInt(e.target.value);
+        document.getElementById('disp-particle-count-val').textContent = visualConfig.particleCount;
+        initParticleSystem();
+      });
+
+      document.getElementById('cfg-particle-speed').addEventListener('input', (e) => {
+        visualConfig.particleSpeed = parseFloat(e.target.value);
+        document.getElementById('disp-particle-speed-val').textContent = visualConfig.particleSpeed.toFixed(1);
+      });
+
+      document.getElementById('cfg-particle-size').addEventListener('input', (e) => {
+        visualConfig.particleSize = parseFloat(e.target.value);
+        document.getElementById('disp-particle-size-val').textContent = visualConfig.particleSize.toFixed(2);
+        if (particleSystem) particleSystem.material.size = visualConfig.particleSize;
+      });
+
+      // Probe position text inputs
+      ['x', 'y', 'z'].forEach(axis => {
+        document.getElementById(`probe-${axis}-input`).addEventListener('input', (e) => {
+          probePos[axis] = parseFloat(e.target.value) || 0;
+          syncProbeUI();
+        });
+      });
+
+      // YAML Modal Controls
+      const modal = document.getElementById('yaml-modal');
+      document.getElementById('btn-yaml-modal').addEventListener('click', () => {
+        document.getElementById('yaml-textarea').value = jsyaml.dump({ wind: windConfig });
+        modal.classList.remove('hidden');
+      });
+      document.getElementById('btn-close-yaml').addEventListener('click', () => {
+        modal.classList.add('hidden');
+      });
+      document.getElementById('btn-copy-yaml').addEventListener('click', () => {
+        const text = document.getElementById('yaml-textarea').value;
+        const temp = document.createElement('textarea');
+        temp.value = text;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
+      });
+      document.getElementById('btn-apply-yaml').addEventListener('click', () => {
+        try {
+          const parsed = jsyaml.load(document.getElementById('yaml-textarea').value);
+          if (parsed && parsed.wind) {
+            Object.assign(windConfig, parsed.wind);
+            updateAllUIFromConfig();
+            modal.classList.add('hidden');
+          }
+        } catch (err) {
+          alert('Invalid YAML syntax: ' + err.message);
+        }
+      });
+    }
+
+    function showProfileParamsGroup(type) {
+      document.querySelectorAll('.profile-param-group').forEach(el => el.classList.add('hidden'));
+      const target = document.getElementById(`params-${type}`);
+      if (target) target.classList.remove('hidden');
+    }
+
+    function bindInput(id, obj, prop) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.value = obj[prop];
+      el.addEventListener('input', () => {
+        obj[prop] = parseFloat(el.value) || 0;
+      });
+    }
+
+    function bindVecInput(id, obj, prop) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.value = obj[prop].join(', ');
+      el.addEventListener('input', () => {
+        const parts = el.value.split(',').map(s => parseFloat(s.trim()) || 0);
+        if (parts.length === 3) obj[prop] = parts;
+      });
+    }
+
+    function updateAllUIFromConfig() {
+      ['x', 'y', 'z'].forEach((axis, i) => {
+        document.getElementById(`cfg-steady-${axis}`).value = windConfig.steady_wind_xyz[i];
+      });
+      document.getElementById('cfg-profile-type').value = windConfig.type;
+      showProfileParamsGroup(windConfig.type);
+
+      document.getElementById('cfg-const-mag').value = windConfig.constant.magnitude;
+      document.getElementById('cfg-const-dir').value = windConfig.constant.direction.join(', ');
+
+      document.getElementById('cfg-step-mag').value = windConfig.step.magnitude;
+      document.getElementById('cfg-step-time').value = windConfig.step.step_time;
+      document.getElementById('cfg-step-dir').value = windConfig.step.direction.join(', ');
+
+      document.getElementById('cfg-sin-amp').value = windConfig.sinusoidal.amplitude;
+      document.getElementById('cfg-sin-freq').value = windConfig.sinusoidal.frequency_hz;
+      document.getElementById('cfg-sin-offset').value = windConfig.sinusoidal.offset;
+      document.getElementById('cfg-sin-phase').value = windConfig.sinusoidal.phase_rad;
+      document.getElementById('cfg-sin-dir').value = windConfig.sinusoidal.direction.join(', ');
+
+      document.getElementById('cfg-gust-mag').value = windConfig.gust.magnitude;
+      document.getElementById('cfg-gust-start').value = windConfig.gust.start_time;
+      document.getElementById('cfg-gust-dur').value = windConfig.gust.duration;
+      document.getElementById('cfg-gust-dir').value = windConfig.gust.direction.join(', ');
+
+      document.getElementById('cfg-dryden-sigma').value = windConfig.dryden.sigma;
+      document.getElementById('cfg-dryden-tau').value = windConfig.dryden.tau_seconds;
+
+      document.getElementById('cfg-random-sigma').value = windConfig.random.sigma;
+
+      document.getElementById('cfg-gust-overlay-enabled').checked = windConfig.gust_enabled;
+      document.getElementById('cfg-overlay-amp').value = windConfig.gust_amplitude_mps;
+      document.getElementById('cfg-overlay-start').value = windConfig.gust_start_s;
+      document.getElementById('cfg-overlay-dur').value = windConfig.gust_duration_s;
+      document.getElementById('cfg-overlay-dir').value = windConfig.gust_direction.join(', ');
+
+      document.getElementById('cfg-spatial-enabled').checked = windConfig.spatial.enabled;
+      ['x', 'y', 'z'].forEach((axis, i) => {
+        document.getElementById(`cfg-ref-${axis}`).value = windConfig.spatial.reference_position_xyz[i];
+        document.getElementById(`cfg-diag-${axis}`).value = windConfig.spatial.gradient_xyz_per_m[i];
+      });
+
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          document.getElementById(`m${r}${c}`).value = windConfig.spatial.gradient_matrix_per_m[r][c];
+        }
+      }
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    // --- MAIN ANIMATION LOOP ---
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - lastTimestamp) / 1000.0) * timeSpeed;
+      lastTimestamp = now;
+
+      if (isPlaying) {
+        simTime += dt;
+        document.getElementById('display-sim-time').textContent = simTime.toFixed(2) + ' s';
+      }
+
+      // Update calculations & 3D render objects
+      updateArrowGrid();
+      if (isPlaying) {
+        updateParticleSystem(dt);
+      }
+
+      // Probe Vector calculation & display update
+      const [pu, pv, pw] = evaluateWindVelocity(probePos.x, probePos.y, probePos.z, simTime);
+      const probeSpeed = Math.sqrt(pu*pu + pv*pv + pw*pw);
+
+      document.getElementById('probe-pos-val').textContent = `[${probePos.x.toFixed(1)}, ${probePos.y.toFixed(1)}, ${probePos.z.toFixed(1)}]`;
+      document.getElementById('probe-vel-val').textContent = `[${pu.toFixed(2)}, ${pv.toFixed(2)}, ${pw.toFixed(2)}]`;
+      document.getElementById('probe-speed-val').textContent = `${probeSpeed.toFixed(2)} m/s`;
+
+      if (isPlaying && speedChart) {
+        updateChart(simTime, probeSpeed);
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // Window Load Initialization
+    window.onload = function() {
+      initThree();
+      initChart();
+      bindUI();
+      syncProbeUI();
+      animate();
+    };
+  </script>
+</body>
+</html>

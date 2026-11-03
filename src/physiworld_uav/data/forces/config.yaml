@@ -1,0 +1,35 @@
+# Starter values only. Calibrate kT, kQ, rotor positions, CdA and mesh coefficients.
+mass_kg: 0.68
+body_aero_mode: lumped   # lumped | surface | none
+
+gravity:
+  enabled: true
+  gravity_W: [0.0, 0.0, -9.81]
+
+rotors:
+  enabled: true
+  k_thrust: 8.54858e-6
+  k_torque: 1.0e-7          # PLACEHOLDER: replace with calibrated kQ
+  thrust_axis_B: [0.0, 1.0, 0.0]
+  positions_B:
+    - [ 0.17, 0.0,  0.17]
+    - [-0.17, 0.0,  0.17]
+    - [-0.17, 0.0, -0.17]
+    - [ 0.17, 0.0, -0.17]
+  spin_directions: [1.0, -1.0, 1.0, -1.0]
+
+lumped_drag:
+  enabled: true
+  air_density: 1.225
+  cd_area_B: [0.08, 0.12, 0.10]  # PLACEHOLDER: estimate/calibrate
+
+surface_aero:
+  enabled: false
+  air_density: 1.225
+  cp_windward: 1.0
+  cp_leeward: 0.6
+  skin_friction_cf: 0.02
+
+added_mass:
+  enabled: false
+  added_mass_B: [0.0, 0.0, 0.0]
