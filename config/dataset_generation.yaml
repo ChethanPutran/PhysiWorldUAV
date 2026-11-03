@@ -73,7 +73,11 @@ sim:
 # ─── Drone model ────────────────────────────────────────────────
 drone_model:
   name: "Hummingbird"
-  controller: "RateController"
+  controller: "LeePositionController"
+
+aerodynamics:
+  air_density: 1.225
+  drag_coefficient_area_xyz: [0.08, 0.12, 0.15]
 
 # ─── Camera (off during dataset generation for speed) ──────────
 camera:
