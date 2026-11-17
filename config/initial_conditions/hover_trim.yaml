@@ -1,0 +1,6 @@
+# Hover equilibrium start (prompt §6B): zero velocity, motors at hover trim.
+position: {x: [-0.5, 0.5], y: [-0.5, 0.5], z: [1.5, 2.5]}
+yaw_deg: [-180.0, 180.0]
+velocity_W: [0.0, 0.0, 0.0]
+angular_velocity_B: [0.0, 0.0, 0.0]
+motor: hover_trim

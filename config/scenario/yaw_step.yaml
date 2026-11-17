@@ -1,0 +1,7 @@
+# Pure yaw step while holding position (both directions).
+data_type: closed_loop
+mode: yaw
+family: hover
+params: {}
+yaw: {type: step, delta_deg: [-120.0, 120.0], start_s: [1.0, 3.0], transition_s: [1.0, 2.0]}
+duration_s: [8.0, 10.0]

@@ -1,0 +1,15 @@
+# One closed-loop hover episode, nominal vehicle, no wind, no project forces.
+# Run 3 exit criterion: new schema + complete metadata from a real Isaac run.
+name: smoke
+dataset_id: smoke
+dataset_version: 0.3.0
+seed: 7
+parts:
+  - name: smk
+    role: train
+    n_groups: 1
+    domain: nominal
+    wind_regime: none
+    forces: none
+    mix:
+      - {scenario: hover, weight: 1.0, overrides: {duration_s: 4.0}}

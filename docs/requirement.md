@@ -189,3 +189,61 @@ and for evaluation:
 \]
 
 Everything else — vision, uncertainty, MPC — is an extension. The minimum viable thesis requires only proprioception, control, ground-truth state, and controlled wind conditions across a well-defined training/OOD split.
+
+1. Add an identifiability-driven experiment design module
+Randomizing mass, inertia and drag is not sufficient. Some parameter combinations can produce very similar trajectories.
+
+For example, increasing mass while increasing thrust can preserve approximately the same acceleration.
+
+You should eventually have an experiment-design component that evaluates whether the generated experiments sufficiently distinguish physical parameters.
+
+Consider:
+- Fisher Information Matrix (FIM).
+- Sensitivity analysis.
+- Parameter correlation.
+- Condition number of the information matrix.
+- Persistent excitation.
+This is particularly important for your open-loop experiments.
+2. Distinguish three types of data
+A. Closed-loop trajectory data
+Control and dynamics learning
+- Controller tracks a reference trajectory.
+- Realistic flight behavior.
+- Contains feedback-dependent control inputs.
+
+B. Open-loop excitation data
+System identification
+- Predefined motor inputs.
+- No feedback correction.
+- Captures natural system response.
+- Useful for identifying dynamics.
+
+C. Counterfactual paired data
+Causal comparison
+- Same initial conditions.
+- Same control sequence.
+- Different physical or environmental parameters.
+- Isolates the effects of physical changes.
+
+These three datasets serve complementary purposes. I would maintain their identities in the metadata rather than mixing them without distinction.
+3. Introduce a model applicability registry
+For each aerodynamic model, maintain a record of its validity.
+
+For example:
+Model	Hover	Translation	High angular velocity
+Lumped quadratic drag	Applicable	Applicable with limitations	Approximation
+Component-level drag	Applicable	Applicable	Depends on local velocity
+Rotational damping	Applicable	Applicable	Coefficient-dependent
+Rotor ground effect	Near ground only	Requires care	Requires validation
+
+The actual applicability must be established from the equations and assumptions of each implementation, not assigned automatically.
+
+This will prevent physically inappropriate force models from being enabled in certain experiments.
+4. Separate simulation truth from observations
+This is essential for world-model training.
+
+I recommend maintaining three distinct data categories:
+- ground_truth: Actual simulator states and physical quantities.
+- observations: IMU, camera and other simulated sensor measurements.
+- actions: Motor commands or actuator inputs.
+This separation will allow you to experiment with different world-model architectures without changing the underlying dataset.

@@ -1,0 +1,9 @@
+# Root config (plan §3). Compose with:  physiworld-generate experiment=<name> [key=value ...]
+defaults:
+  - drone: hummingbird
+  - physics: isaac_200hz
+  - limits: default
+  - controller: default
+  - dataset: default
+  - experiment: smoke
+  - _self_

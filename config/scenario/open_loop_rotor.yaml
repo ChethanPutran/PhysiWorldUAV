@@ -1,0 +1,8 @@
+# Pure open loop at the actuator (prompt §6B-1): mixer-space perturbations around
+# hover trim, no feedback. Short; the termination envelope ends divergent runs.
+data_type: open_loop
+mode: open_loop
+open_loop_kind: rotor_command
+initial_conditions: hover_trim
+channels: {}                 # filled by an excitation template (e.g. rotor_doublets)
+duration_s: [2.0, 4.0]

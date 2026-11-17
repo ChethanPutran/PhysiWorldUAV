@@ -1,0 +1,5 @@
+# PRBS with smooth edges (safe for a tracking controller). Peak reference
+# acceleration ≈ 2A·5.77/edge² (min-jerk flip), kept below the feasibility limit.
+channels:
+  x: {type: prbs, amplitude: [0.08, 0.2], clock_s: [1.2, 2.0], edge_s: 1.0}
+  y: {type: prbs, amplitude: [0.08, 0.2], clock_s: [1.2, 2.0], edge_s: 1.0}

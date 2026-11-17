@@ -1,0 +1,15 @@
+# Dataset storage and model-ready view (plan §6.5).
+output_root: data/datasets
+storage:
+  format: hdf5               # confirmed by the Run 5 storage benchmark (DS-STORE)
+  compression: gzip
+  compression_opts: 4
+  episodes_per_shard: 200
+builder:
+  history: 10                # H model steps (0.2 s at 50 Hz)
+  horizon: 20                # P model steps (0.4 s); evaluation horizons up to 100 (2 s)
+  stride: 1
+  action_key: rotor_speed_mean   # D3: rotor angular velocity (interval mean, post motor lag)
+  obs_mode: instant
+  statuses: [completed]
+  exclude_open_loop_kinds: [body_wrench]

@@ -1,0 +1,6 @@
+data_type: closed_loop
+mode: translation
+family: sinusoidal
+params: {azimuth_deg: [0.0, 360.0], elevation_deg: [-30.0, 30.0], amplitude_m: [0.5, 1.5],
+         frequency_hz: [0.1, 0.35], ramp_s: 2.0}
+duration_s: [10.0, 14.0]

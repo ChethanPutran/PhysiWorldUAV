@@ -1,3 +1,9 @@
+> **Erratum (2026-11-16, decision D1 in `docs/audit/run2_implementation_plan.md`):** wind
+> magnitudes written in **N** in this document (e.g. "≤ 4 N", "5–8 N") should be read as wind
+> **velocity in m/s**, consistent with the thesis and `docs/requirement.md` (ID |w| ∈ [0, 4] m/s,
+> OOD (4, 8] m/s). The disturbance force depends on the drag model and is logged as auxiliary
+> ground truth only. The rest of this document is unchanged.
+
 # Why Hover-Only Data Cannot Train a Wind-Aware World Model
 
 You've identified the central problem yourself, and it is real. Let me spell out exactly what goes wrong, and then give the fix.

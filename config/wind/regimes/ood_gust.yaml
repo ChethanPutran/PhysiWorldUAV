@@ -1,0 +1,10 @@
+# OOD gust structure: impulsive gusts (rise < 0.2 s), magnitude within ID limits.
+name: ood_gust
+category: ood_gust
+mean_speed: [0.0, 2.0]
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: cosine_gust, weight: 0.6, params: {peak_mps: [1.0, 2.0], rise_time_s: [0.05, 0.18], onset_fraction: [0.15, 0.7]}}
+  - {type: random_gusts, weight: 0.4, params: {rate_hz: [0.2, 0.5], peak_range_mps: [0.8, 1.5], rise_range_s: [0.05, 0.15]}}
+limits: {peak_speed_max: 4.0, vertical_max: 1.0, mean_horizontal: [0.0, 4.0]}

@@ -2,7 +2,7 @@
 docker start -ai isaac-sim
 
 # 2. On your laptop — tunnel port 6080
-ssh -L 6080:localhost:6080 chetan@10.24.36.121
+ssh -L 6080:localhost:6080 <user>@<server-ip>
 
 # 3. In your browser
 #    http://localhost:6080/vnc.html  →  Connect

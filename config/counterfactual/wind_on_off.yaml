@@ -1,0 +1,3 @@
+variable: wind_on_off
+mode: closed_loop
+values: [false, true]

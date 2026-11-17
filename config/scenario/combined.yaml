@@ -1,0 +1,7 @@
+# Simultaneous translation and rotation: circle with a yaw oscillation.
+data_type: closed_loop
+mode: combined
+family: circle
+params: {radius_m: [1.0, 2.0], omega_radps: [0.3, 0.6], ramp_s: 2.0, start_angle_deg: [0.0, 360.0]}
+yaw: {type: sine, amplitude_deg: [20.0, 60.0], frequency_hz: [0.05, 0.2], ramp_s: 2.0}
+duration_s: [12.0, 15.0]

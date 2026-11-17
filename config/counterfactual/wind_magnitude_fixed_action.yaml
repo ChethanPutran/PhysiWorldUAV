@@ -1,0 +1,4 @@
+# Mode B: siblings replay the zero-wind baseline's applied rotor commands.
+variable: wind_magnitude
+mode: fixed_action
+values: [0.0, 0.5, 1.0]

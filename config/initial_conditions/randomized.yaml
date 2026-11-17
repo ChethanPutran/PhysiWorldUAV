@@ -1,0 +1,6 @@
+# Perturbed start: small initial linear/angular velocity (motors still at hover trim).
+position: {x: [-0.5, 0.5], y: [-0.5, 0.5], z: [1.5, 2.5]}
+yaw_deg: [-180.0, 180.0]
+velocity_W: [[-0.3, 0.3], [-0.3, 0.3], [-0.2, 0.2]]
+angular_velocity_B: [[-0.2, 0.2], [-0.2, 0.2], [-0.2, 0.2]]
+motor: hover_trim
