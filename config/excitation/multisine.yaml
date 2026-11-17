@@ -1,0 +1,4 @@
+# Experiment D: Schroeder multisine on the position reference (low crest factor).
+channels:
+  x: {type: multisine, amplitude: [0.15, 0.3], f_min_hz: 0.1, f_max_hz: 0.6, n_tones: 8, ramp_s: 1.0}
+  y: {type: multisine, amplitude: [0.15, 0.3], f_min_hz: 0.1, f_max_hz: 0.6, n_tones: 8, ramp_s: 1.0}

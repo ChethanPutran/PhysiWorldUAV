@@ -1,0 +1,6 @@
+data_type: closed_loop
+mode: yaw
+family: hover
+params: {}
+yaw: {type: sine, amplitude_deg: [20.0, 60.0], frequency_hz: [0.1, 0.3], ramp_s: 1.5}
+duration_s: [8.0, 12.0]

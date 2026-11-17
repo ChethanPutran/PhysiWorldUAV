@@ -1,0 +1,5 @@
+data_type: closed_loop
+mode: translation
+family: waypoints
+params: {offsets_m: {count: [3, 5], box_m: [2.0, 2.0, 0.7]}, segment_s: [2.5, 4.0]}
+duration_s: [12.0, 16.0]

@@ -1,0 +1,14 @@
+# OOD wind magnitude (thesis primary OOD): mean horizontal wind in (4, 8] m/s,
+# same direction band and temporal classes as ID. Beaufort: gentle … moderate breeze.
+name: ood_magnitude
+category: ood_magnitude
+mean_speed: [4.2, 7.5]
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: steady, weight: 0.3}
+  - {type: cosine_gust, weight: 0.15, params: {peak_mps: [0.3, 1.0], rise_time_s: [0.5, 1.5], onset_fraction: [0.15, 0.7]}}
+  - {type: step, weight: 0.15, params: {delta_mps: [-1.0, 1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.7]}}
+  - {type: sinusoid, weight: 0.15, params: {amplitude_mps: [0.2, 0.8], frequency_hz: [0.05, 0.3]}}
+  - {type: ou, weight: 0.25, params: {sigma_mps: [0.1, 0.4], tau_s: [2.0, 5.0]}}
+limits: {peak_speed_max: 10.0, vertical_max: 1.0, mean_horizontal: [4.0001, 8.0]}

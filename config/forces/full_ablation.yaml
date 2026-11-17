@@ -1,0 +1,11 @@
+# Ablation (identifiability group E): every model, incl. ground effect and the lumped
+# rotational damping (which double counts rotor-drag damping — by design for the ablation).
+name: full_ablation
+validated: false
+air_density: 1.225
+rotor_radius_m: 0.10
+rotor_drag: {enabled: true, d_hover_per_s: 0.30}
+body_drag: {enabled: true, cd: 1.1, area_m2: [0.0070, 0.0076, 0.0180]}
+ground_effect: {enabled: true, min_height_over_radius: 0.5}
+aero_torque: {enabled: true, k1: [0.002, 0.002, 0.001], k2: 0.0}
+max_violation_fraction: 0.05

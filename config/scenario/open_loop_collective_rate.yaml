@@ -1,0 +1,8 @@
+# Rate-stabilised open loop (prompt §6B-2): collective + body-rate commands to
+# OmniDrones' RateController (inner rate loop closed, no position/attitude loop).
+data_type: open_loop
+mode: open_loop
+open_loop_kind: collective_rate
+initial_conditions: hover_trim
+channels: {}
+duration_s: [2.0, 4.0]

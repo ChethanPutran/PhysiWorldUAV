@@ -1,0 +1,9 @@
+# Combined roll/pitch oscillation with yaw rotation.
+data_type: closed_loop
+mode: attitude
+family: attitude_combined
+hold_position: true
+params: {roll_amplitude_deg: [5.0, 12.0], pitch_amplitude_deg: [5.0, 12.0], frequency_hz: [0.2, 0.5],
+         phase_deg: [0.0, 180.0], ramp_s: 1.0}
+yaw: {type: rate, rate_degps: [-30.0, 30.0], ramp_s: 1.0}
+duration_s: [8.0, 10.0]

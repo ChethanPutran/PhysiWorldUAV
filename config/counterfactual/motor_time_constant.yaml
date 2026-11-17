@@ -1,0 +1,3 @@
+variable: motor_time_constant
+mode: fixed_action
+values: [1.0, 1.15, 0.85]

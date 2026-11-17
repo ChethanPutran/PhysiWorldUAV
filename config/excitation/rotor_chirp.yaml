@@ -1,0 +1,3 @@
+# Open loop at the actuator: roll-torque chirp.
+channels:
+  tau_x: {type: chirp, amplitude: [0.005, 0.015], f0_hz: 0.5, f1_hz: 5.0, sweep_s: [2.0, 3.0], start_s: 0.2}

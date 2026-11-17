@@ -1,0 +1,4 @@
+# Same realisation, amplitude scaled; sibling 0 (baseline) is zero wind (D8). Mode A.
+variable: wind_magnitude
+mode: closed_loop
+values: [0.0, 0.5, 1.0]

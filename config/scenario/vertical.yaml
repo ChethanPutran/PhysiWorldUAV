@@ -1,0 +1,6 @@
+# Vertical ascent or descent (min-jerk move of dz).
+data_type: closed_loop
+mode: translation
+family: vertical
+params: {dz_m: [-1.0, 1.5], start_s: [1.0, 3.0], move_s: [2.0, 4.0]}
+duration_s: [8.0, 12.0]

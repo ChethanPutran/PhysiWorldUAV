@@ -1,0 +1,19 @@
+# Physical domain randomisation (plan §6.4, decision D9).
+# Relative factors around nominal: ID ±id_halfwidth; OOD shell a < |δ| ≤ b.
+# Choose the region per use: id (default) | ood_physics | ood_combination.
+region: id
+sampler: sobol                      # sobol | lhs | random
+min_thrust_to_weight: 2.0
+parameters:
+  mass:                {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+  inertia_shape_x:     {id_halfwidth: 0.05}      # J = J0 · (m/m0) · shape
+  inertia_shape_y:     {id_halfwidth: 0.05}
+  inertia_shape_z:     {id_halfwidth: 0.05}
+  force_scale:         {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+  km_kf_ratio:         {id_halfwidth: 0.05}
+  motor_time_constant: {id_halfwidth: 0.20, ood_shell: [0.20, 0.40]}
+  rotor_drag_scale:    {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+  body_drag_scale:     {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+# Held-out combinations (never in ID data): heavy vehicle with weak rotors.
+holdout_corners:
+  - {mass: 0.5, force_scale: -0.5}

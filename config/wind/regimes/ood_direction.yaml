@@ -1,0 +1,11 @@
+# OOD direction: diagonal/vertical flow (|elevation| ≥ 15°), magnitude within the ID range.
+name: ood_direction
+category: ood_direction
+mean_speed: [1.5, 3.5]
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [[20.0, 60.0], [-60.0, -20.0]]
+profiles:
+  - {type: steady, weight: 0.5}
+  - {type: ou, weight: 0.5, params: {sigma_mps: [0.1, 0.3], tau_s: [2.0, 5.0]}}
+limits: {peak_speed_max: 4.0, vertical_max: null, vertical_min: 0.5, mean_horizontal: [0.0, 4.0],
+         mean_elevation_min_deg: 15.0}

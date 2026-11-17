@@ -1,0 +1,7 @@
+# Pure roll doublet (+φ, −φ, level) under the AttitudeController with a slow position hold.
+data_type: closed_loop
+mode: attitude
+family: attitude_doublet
+hold_position: true
+params: {axis: roll, amplitude_deg: [5.0, 15.0], start_s: [1.0, 2.0], hold_s: [0.4, 0.8], edge_s: [0.4, 0.6]}
+duration_s: [6.0, 8.0]

@@ -1,0 +1,6 @@
+# Hover / position hold (identifiability mode: hover; keep ≤ 10–20 % of data).
+data_type: closed_loop
+mode: hover
+family: hover
+params: {}
+duration_s: [10.0, 15.0]

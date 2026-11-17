@@ -1,0 +1,5 @@
+# Experiment C (design doc §11.3): bounded smooth perturbations of the position reference.
+channels:
+  x: {type: smooth_random, amplitude: [0.1, 0.3], f_min_hz: 0.05, f_max_hz: 0.5, n_tones: 10, ramp_s: 1.0}
+  y: {type: smooth_random, amplitude: [0.1, 0.3], f_min_hz: 0.05, f_max_hz: 0.5, n_tones: 10, ramp_s: 1.0}
+  z: {type: smooth_random, amplitude: [0.05, 0.15], f_min_hz: 0.05, f_max_hz: 0.5, n_tones: 10, ramp_s: 1.0}

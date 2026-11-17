@@ -1,0 +1,8 @@
+# Ablation (identifiability group E): body drag only.
+name: body_drag_only
+validated: false
+air_density: 1.225
+rotor_radius_m: 0.10
+rotor_drag: {enabled: false}
+body_drag: {enabled: true, cd: 1.1, area_m2: [0.0070, 0.0076, 0.0180]}
+max_violation_fraction: 0.05

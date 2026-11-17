@@ -13,3 +13,18 @@ OmniDrones
 IsaacLab
 scripts/outputs
 .env
+lagacy
+# Secrets / local environment
+.env
+.env.*
+*.pem
+*.key
+*.p12
+id_rsa*
+credentials*.json
+
+# Generated artefacts (regenerate from manifests; never commit)
+/data/
+/outputs/
+.pytest_cache/
+.hydra/

@@ -1,0 +1,18 @@
+# Plan-time feasibility (plan §6.3-T13) and run-time termination envelope (plan §4).
+feasibility:
+  thrust_fraction: [0.15, 0.85]     # of T_max (nominal, no wind → margin for drag/wind)
+  max_tilt_deg: 35.0
+  max_tilt_rate_radps: 3.0
+  max_yaw_rate_radps: 2.0
+  max_speed_mps: 5.0
+  max_accel_mps2: 5.0
+  max_jerk_mps3: 30.0
+  workspace_min: [-30.0, -30.0, 0.5]
+  workspace_max: [30.0, 30.0, 10.0]
+  sample_hz: 100.0
+termination:
+  z_min: 0.1                        # m (ground)
+  tilt_max_deg: 80.0
+  speed_max_mps: 15.0
+  workspace_min: [-40.0, -40.0, 0.0]
+  workspace_max: [40.0, 40.0, 20.0]

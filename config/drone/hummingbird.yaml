@@ -1,0 +1,50 @@
+# config/drone/hummingbird.yaml
+# Single source of truth for the Hummingbird quadrotor (plan §3-C4).
+# Shared keys are cross-checked at start-up against OmniDrones'
+# robots/assets/usd/hummingbird.yaml (drones/params.py::check_against_omnidrones).
+# All quantities in SI units.
+
+name: hummingbird
+frame: FLU_body               # body frame: x-forward, y-left, z-up; thrust along +Z_B
+world_frame: ENU              # x-East, y-North, z-Up
+
+# --- rigid body -------------------------------------------------------------
+# `mass` is the TOTAL vehicle mass (base_link 0.68 kg + 4 rotor links 0.009 kg,
+# read from the OmniDrones USD). OmniDrones' MASS_0 is the base_link mass only.
+mass: 0.716                   # kg
+rotor_link_mass: 0.009        # kg per rotor link (USD)
+inertia:                      # kg*m^2, as configured in OmniDrones (base_link inertia;
+  xx: 0.007                   # composite inertia is computed from PhysX in Run 4)
+  xy: 0.0
+  xz: 0.0
+  yy: 0.007
+  yz: 0.0
+  zz: 0.012
+
+# --- geometry ---------------------------------------------------------------
+# l is the distance between *opposite rotors*; per-rotor arm length is l/2.
+l: 0.34
+arm_length_diagonal: 0.34
+arm_length_individual: 0.17
+rotor_height: 0.01            # m, rotor hub height above base_link origin (USD)
+layout: plus                  # "+" layout, rotor_0 on +x_B
+
+# --- aerodynamics (OmniDrones parameter; OmniDrones initialises its drag to 0) --
+drag_coef: 0.2
+
+# --- motors -----------------------------------------------------------------
+# OmniDrones RotorGroup applies a per-step blend throttle += alpha*(target-throttle)
+# with alpha = 0.43 at dt = 0.005 s, i.e. tau_m = -dt/ln(1-alpha) ~= 8.9 ms.
+motor_alpha_nominal: 0.43
+motor_alpha_reference_dt: 0.005
+
+# --- rotors -----------------------------------------------------------------
+rotor_configuration:
+  num_rotors: 4
+  arm_lengths: [0.17, 0.17, 0.17, 0.17]
+  directions: [-1.0, 1.0, -1.0, 1.0]          # spin sign per rotor (OmniDrones)
+  rotor_angles: [0.0, 1.57079632679, 3.14159265359, -1.57079632679]   # in body X-Y plane
+  force_constants:  [8.54858e-06, 8.54858e-06, 8.54858e-06, 8.54858e-06]   # N / (rad/s)^2
+  moment_constants: [1.3677728816219314e-07, 1.3677728816219314e-07,
+                     1.3677728816219314e-07, 1.3677728816219314e-07]        # N*m / (rad/s)^2
+  max_rotation_velocities: [838, 838, 838, 838]                             # rad/s

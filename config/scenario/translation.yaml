@@ -1,0 +1,9 @@
+# Forward / backward / lateral translation relative to the initial heading.
+data_type: closed_loop
+mode: translation
+family: line
+params:
+  heading_offset_deg: {choice: [0.0, 180.0, 90.0, -90.0]}
+  speed_mps: [0.5, 2.0]
+  ramp_s: [1.0, 2.0]
+duration_s: [8.0, 12.0]

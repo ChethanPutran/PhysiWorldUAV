@@ -1,0 +1,2 @@
+# The nominal vehicle (config/drone/<name>.yaml), no randomisation.
+region: nominal

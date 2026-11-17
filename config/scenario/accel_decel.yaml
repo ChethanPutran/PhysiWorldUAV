@@ -1,0 +1,6 @@
+# Accelerate → cruise → decelerate → hold.
+data_type: closed_loop
+mode: accel
+family: accel_decel
+params: {azimuth_deg: [0.0, 360.0], speed_mps: [1.0, 2.5], ramp_s: [0.8, 2.0], cruise_s: [1.0, 3.0]}
+duration_s: [10.0, 12.0]

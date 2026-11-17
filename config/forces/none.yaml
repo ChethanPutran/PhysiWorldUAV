@@ -1,0 +1,5 @@
+# config/forces/none.yaml — no project force models: only PhysX gravity and
+# OmniDrones rotor thrust / reaction torque act on the vehicle.
+name: none
+validated: true
+models: {}

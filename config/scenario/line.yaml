@@ -1,0 +1,6 @@
+# Constant-velocity straight line in an arbitrary world direction (small climb/descent).
+data_type: closed_loop
+mode: translation
+family: line
+params: {azimuth_deg: [0.0, 360.0], elevation_deg: [-10.0, 10.0], speed_mps: [0.5, 2.0], ramp_s: [1.0, 2.0]}
+duration_s: [8.0, 12.0]

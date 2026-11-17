@@ -1,0 +1,11 @@
+# Controllers (plan §6.3-T1, decision Q2).
+policy: "true"               # build controllers from the TRUE domain parameters ("nominal" for ablation)
+position:
+  gains: null                # null → OmniDrones cfg/lee_controller_hummingbird.yaml
+attitude:
+  attitude_hold:             # slow yaw-aware hold for attitude manoeuvres (plan T6)
+    kp_xy: 0.8
+    kd_xy: 1.2
+    kp_z: 2.0
+    kd_z: 1.5
+    max_tilt_rad: 0.35

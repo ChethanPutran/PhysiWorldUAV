@@ -1,0 +1,6 @@
+# Rate-stabilised open loop: body-rate doublets and a collective step.
+channels:
+  collective: {type: step, amplitude: [-0.8, 0.8], start_s: [0.5, 1.5]}
+  rate_x: {type: doublet, amplitude: [-1.0, 1.0], start_s: [0.3, 1.0], width_s: [0.15, 0.3]}
+  rate_y: {type: doublet, amplitude: [-1.0, 1.0], start_s: [0.3, 1.0], width_s: [0.15, 0.3]}
+  rate_z: {type: pulse, amplitude: [-1.0, 1.0], start_s: [0.5, 1.5], width_s: [0.3, 0.6]}

@@ -1,0 +1,4 @@
+# Same wind, IC, reference; vehicle mass × value (must stay inside the part's region).
+variable: mass
+mode: closed_loop
+values: [1.0, 1.05, 0.95]

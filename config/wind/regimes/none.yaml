@@ -1,0 +1,6 @@
+# No wind (physics validation case A; zero-wind baselines use the counterfactual instead).
+name: none
+category: id
+mean_speed: 0.0
+profiles: [{type: none}]
+limits: {peak_speed_max: 0.0, vertical_max: 0.0, mean_horizontal: [0.0, 0.0]}

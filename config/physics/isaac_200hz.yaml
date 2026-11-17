@@ -1,0 +1,17 @@
+# Simulator settings (plan §1-V4, D4, D6; Run 4 IMU decision (a)).
+dt: 0.005                    # s, PhysX step (200 Hz)
+control_decimation: 4        # controller / model step = 4·dt = 0.02 s (50 Hz)
+device: cuda:0               # GPU used for PhysX dynamics
+# gpu_dynamics_cpu_readback: GPU dynamics + GPU broadphase, results read back to the
+# CPU every step (Isaac IMUSensor needs the readback; verified in Run 4).
+# "gpu" (no readback) makes IMUSensor report gravity-only frames — not allowed.
+physics_pipeline: gpu_dynamics_cpu_readback
+headless: true
+gravity: 9.81                # m/s², must equal DroneParams.G
+enhanced_determinism: true   # physxScene:enableEnhancedDeterminism (V4)
+rigid_body_damping:          # D6: OmniDrones defaults are 0.2 / 0.2 (hidden drag)
+  linear: 0.0
+  angular: 0.0
+solver:                      # OmniDrones RobotCfg values, recorded for provenance
+  position_iterations: 4
+  velocity_iterations: 0

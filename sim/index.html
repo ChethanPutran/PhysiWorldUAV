@@ -200,14 +200,32 @@
                             class="text-rose-400 text-[10px]">[0, 0, 0]</span></div>
                     <div class="flex justify-between"><span>Peak Pressure:</span><span id="hud-max-press"
                             class="text-rose-400 text-[11px]">0.00</span></div>
+                    <div class="flex justify-between border-t border-slate-800 pt-1 mt-1">
+    <span>Friction model:</span>
+    <span id="hud-cf-model" class="text-emerald-300 text-[10px]">constant</span>
+</div>
+<div class="flex justify-between"><span>Avg Re (surface):</span>
+    <span id="hud-re-avg" class="text-cyan-300 text-[10px]">—</span></div>
+<div class="flex justify-between"><span>Avg Cf (surface):</span>
+    <span id="hud-cf-avg" class="text-cyan-300 text-[10px]">—</span></div>
+<div class="flex justify-between"><span>Aero Drag (flow):</span>
+    <span id="hud-aero-drag" class="text-rose-300 font-bold">0.00 N</span></div>
+<div class="flex justify-between"><span>Aero Lift (flow):</span>
+    <span id="hud-aero-lift" class="text-sky-300 font-bold">0.00 N</span></div>
+                    <div class="flex justify-between border-t border-slate-800 pt-1 mt-1">
+                        <span class="text-cyan-300 font-semibold">Drag F_W / F_B:</span>
+                        <span id="hud-drag-ratio" class="text-cyan-400 font-bold text-[11px]">—</span>
+                    </div>
                     <div class="flex justify-between"><span>Att Roll/Pitch:</span><span id="hud-att"
                             class="text-slate-400 text-[11px]">0.0°, 0.0°</span></div>
                     <div class="flex justify-between"><span>Probe Wind:</span><span id="hud-probe-wind"
                             class="text-teal-400 font-bold">0.00 m/s</span></div>
                     <div class="flex justify-between"><span>Probe ΔV:</span><span id="hud-probe-dv"
                             class="text-cyan-400 text-[11px]">0.00 m/s</span></div>
-                    <div class="flex justify-between"><span>Ref |v|:</span><span id="hud-ref-speed" class="text-cyan-300 font-bold">0.00 m/s</span></div>
-<div class="flex justify-between"><span>V<sub>max</sub>:</span><span id="hud-ref-vmax" class="text-slate-400 text-[11px]">— m/s</span></div>
+                    <div class="flex justify-between"><span>Ref |v|:</span><span id="hud-ref-speed"
+                            class="text-cyan-300 font-bold">0.00 m/s</span></div>
+                    <div class="flex justify-between"><span>V<sub>max</sub>:</span><span id="hud-ref-vmax"
+                            class="text-slate-400 text-[11px]">— m/s</span></div>
                 </div>
             </div>
 
@@ -369,20 +387,22 @@
                                     class="rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-0 w-3 h-3"><span>Loop
                                     trajectory</span>
                             </label>
-                            <div id="velocity-envelope-banner" class="rounded-lg border px-2 py-1.5 text-[10px] flex items-start gap-1.5 mt-2">
-                            <i data-lucide="gauge" class="w-3.5 h-3.5 shrink-0 mt-0.5"></i>
-                            <div class="flex-1 leading-snug">
-                                <div class="font-semibold">
-                                Velocity envelope:
-                                <span id="vel-env-vmax" class="font-mono">—</span> m/s
-                                <span class="text-slate-500">(accel cap <span id="vel-env-amax" class="font-mono">—</span> m/s²)</span>
+                            <div id="velocity-envelope-banner"
+                                class="rounded-lg border px-2 py-1.5 text-[10px] flex items-start gap-1.5 mt-2">
+                                <i data-lucide="gauge" class="w-3.5 h-3.5 shrink-0 mt-0.5"></i>
+                                <div class="flex-1 leading-snug">
+                                    <div class="font-semibold">
+                                        Velocity envelope:
+                                        <span id="vel-env-vmax" class="font-mono">—</span> m/s
+                                        <span class="text-slate-500">(accel cap <span id="vel-env-amax"
+                                                class="font-mono">—</span> m/s²)</span>
+                                    </div>
+                                    <div id="vel-env-status" class="text-slate-400 mt-0.5">—</div>
                                 </div>
-                                <div id="vel-env-status" class="text-slate-400 mt-0.5">—</div>
-                            </div>
-                            <button id="btn-clamp-velocities"
+                                <button id="btn-clamp-velocities"
                                     class="text-[9px] px-1.5 py-0.5 bg-amber-900/40 hover:bg-amber-900/60 text-amber-200 rounded border border-amber-800/60 whitespace-nowrap">
-                                Clamp
-                            </button>
+                                    Clamp
+                                </button>
                             </div>
                             <div id="waypoint-list" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
                         </div>
@@ -671,6 +691,49 @@
                                         value="0.03">
                                 </div>
                             </div>
+
+                            <!-- NEW: flat-plate skin friction (Approach 3) -->
+<div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+    <div>
+        <label class="text-[10px] text-slate-400 block mb-1">Skin-friction model</label>
+        <select id="cfg-skinfriction-model"
+                class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]">
+            <option value="constant">Constant C<sub>f</sub></option>
+            <option value="reynolds">Reynolds-dependent C<sub>f</sub> (flat plate)</option>
+        </select>
+    </div>
+    <div>
+        <label class="text-[10px] text-slate-400 block mb-1">Characteristic length</label>
+        <select id="cfg-plate-length-mode"
+                class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]">
+            <option value="triangle">Per-triangle √A</option>
+            <option value="fixed">Fixed length</option>
+        </select>
+    </div>
+</div>
+<div class="grid grid-cols-3 gap-2 pt-1">
+    <div id="plate-length-fixed" class="hidden">
+        <label class="text-[10px] text-slate-400 block mb-1">L (m)</label>
+        <input type="number" step="0.01" id="cfg-plate-length" value="0.30"
+               class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]">
+    </div>
+    <div>
+        <label class="text-[10px] text-slate-400 block mb-1">μ (Pa·s)</label>
+        <input type="number" step="1e-6" id="cfg-dyn-viscosity" value="1.81e-5"
+               class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]">
+    </div>
+    <div>
+        <label class="text-[10px] text-slate-400 block mb-1">Re<sub>crit</sub></label>
+        <input type="number" step="10000" id="cfg-re-crit" value="500000"
+               class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]">
+    </div>
+</div>
+<p class="text-[10px] text-slate-500 leading-snug pt-1">
+    Flat-plate correlations (smooth plate, zero pressure gradient):
+    <span class="font-mono text-slate-400">C<sub>f</sub> = 1.328/√Re</span> (laminar),
+    <span class="font-mono text-slate-400">0.074/Re<sup>0.2</sup> − 1742/Re</span> (turbulent).
+</p>
+
                             <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer pt-1">
                                 <input type="checkbox" id="cfg-use-surface-dyn"
                                     class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
@@ -929,6 +992,283 @@
                 <!-- ==================== CFD TAB ==================== -->
                 <div id="tab-visuals" class="tab-content space-y-4 hidden">
                     <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="book-open" class="w-4 h-4 text-indigo-400"></i>
+                            <span>Rigid Body in Fluid · arXiv:2601.13971v2</span>
+                        </h3>
+                        <p class="text-[10px] text-slate-500 leading-snug">
+                            Coefficient-free model: added mass from potential flow, surface pressure
+                            from local slip velocity, single-parameter separation criterion α.
+                        </p>
+
+                        <label class="flex items-center space-x-2 text-slate-300 font-medium cursor-pointer">
+                            <input type="checkbox" id="cfg-paper-model-enabled"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Enable paper pressure + separation (α)</span>
+                        </label>
+
+                        <label class="flex items-center space-x-2 text-slate-300 font-medium cursor-pointer">
+                            <input type="checkbox" id="cfg-added-mass-enabled"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Include added mass &amp; added inertia</span>
+                        </label>
+
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Separation angle α</span>
+                                <span id="disp-alpha-sep" class="font-mono">90°</span>
+                            </div>
+                            <input type="range" id="cfg-alpha-sep" min="60" max="130" step="1" value="90"
+                                class="w-full">
+                            <p class="text-[9px] text-slate-500 mt-1 leading-snug">
+                                π/2 (90°) → classic. 1.3π/2 (117°) → attached past the equator, as in
+                                the paper's falling-plate results.
+                            </p>
+                        </div>
+
+                        <div class="text-[10px] text-slate-400 font-mono pt-2 border-t border-slate-800 space-y-0.5">
+                            <div class="flex justify-between">
+                                <span>m_add [x,y,z]:</span>
+                                <span id="hud-m-add" class="text-indigo-300">—</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>J_add [x,y,z]:</span>
+                                <span id="hud-J-add" class="text-indigo-300 text-[9px]">—</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>m_eff:</span>
+                                <span id="hud-m-eff" class="text-cyan-300">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-2">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="toggle-left" class="w-4 h-4 text-violet-400"></i>
+                            <span>Force Toggles · All Phases</span>
+                        </h3>
+                        <p class="text-[10px] text-slate-500 leading-snug">
+                            Enable/disable individual physics terms to isolate their contribution.
+                            Disable all to get the baseline momentum-only model.
+                        </p>
+
+                        <div class="text-[10px] text-violet-300 font-semibold uppercase tracking-wide pt-1">Pressure
+                            &amp; Shear</div>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-surface-dyn"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Surface forces drive dynamics (vs. lumped drag)</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-paper-pressure"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Paper pressure model + separation α</span>
+                        </label>
+
+                        <div class="text-[10px] text-violet-300 font-semibold uppercase tracking-wide pt-2">Rotor
+                            Aerodynamics</div>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-rotor-wind"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Rotor-wind coupling (T ∝ v/√(V⊥²+v²))</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-rotor-interference"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Rotor-rotor interference</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-ground-effect"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Ground effect (IGE thrust boost)</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-download"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Self-induced download (forward flight)</span>
+                        </label>
+
+                        <div class="text-[10px] text-violet-300 font-semibold uppercase tracking-wide pt-2">Transient
+                            &amp; Body</div>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-added-mass"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Added mass &amp; added inertia</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-unsteady-lift"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Unsteady lift (Wagner lag)</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-buoyancy"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Thermal buoyancy</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-coriolis"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Coriolis (Earth rotation)</span>
+                        </label>
+                        <label class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer">
+                            <input type="checkbox" id="cfg-force-compressibility"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Compressibility (Prandtl-Glauert)</span>
+                        </label>
+
+                        <div class="text-[10px] text-violet-300 font-semibold uppercase tracking-wide pt-2">Tuning</div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="text-[10px] text-slate-400 block mb-1">Rotor interf. k</label>
+                                <input type="number" step="0.01" id="cfg-rotor-interference-k"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]"
+                                    value="0.12">
+                            </div>
+                            <div><label class="text-[10px] text-slate-400 block mb-1">Download k</label>
+                                <input type="number" step="0.01" id="cfg-download-k"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]"
+                                    value="0.10">
+                            </div>
+                            <div><label class="text-[10px] text-slate-400 block mb-1">Wagner τ (s)</label>
+                                <input type="number" step="0.005" id="cfg-wagner-tau"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]"
+                                    value="0.05">
+                            </div>
+                            <div><label class="text-[10px] text-slate-400 block mb-1">Buoyancy ΔT (K)</label>
+                                <input type="number" step="0.5" id="cfg-buoyancy-dt"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]"
+                                    value="5">
+                            </div>
+                            <div><label class="text-[10px] text-slate-400 block mb-1">Latitude (°)</label>
+                                <input type="number" step="1" id="cfg-latitude"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px]"
+                                    value="0">
+                            </div>
+                        </div>
+
+                        <div class="text-[10px] text-slate-400 font-mono pt-2 border-t border-slate-800 space-y-0.5">
+                            <div class="flex justify-between">
+                                <span>Wagner φ:</span>
+                                <span id="hud-wagner-phi" class="text-violet-300">1.00</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-2">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="bar-chart-3" class="w-4 h-4 text-emerald-400"></i>
+                            <span>Per-Toggle Force / Torque</span>
+                        </h3>
+                        <p class="text-[10px] text-slate-500 leading-snug">
+                            Live magnitudes for each toggle. Rows dim when toggle is OFF.
+                        </p>
+                        <div class="font-mono text-[10px] text-slate-300">
+                            <div class="grid grid-cols-[1fr_auto_auto] gap-x-2 gap-y-1 items-center">
+                                <span class="text-slate-500 font-semibold pb-1 border-b border-slate-800">Toggle</span>
+                                <span
+                                    class="text-slate-500 font-semibold pb-1 border-b border-slate-800 text-right w-[70px]">|F|
+                                    N</span>
+                                <span
+                                    class="text-slate-500 font-semibold pb-1 border-b border-slate-800 text-right w-[80px]">|τ|
+                                    N·m</span>
+
+                                <span>Surface forces</span>
+                                <span id="tg-f-surfaceForce" class="text-right">—</span>
+                                <span id="tg-m-surfaceForce" class="text-right">—</span>
+                                <span class="italic text-slate-400">Lumped drag (F_B)</span>
+                                <span id="tg-f-lumpedDrag" class="text-right">—</span>
+                                <span id="tg-m-lumpedDrag" class="text-right text-slate-600">—</span>
+
+                                <span>Paper pressure</span>
+                                <span id="tg-f-paperPressure" class="text-right">—</span>
+                                <span id="tg-m-paperPressure" class="text-right">—</span>
+
+                                <span>Rotor-wind</span>
+                                <span id="tg-f-rotorWind" class="text-right">—</span>
+                                <span id="tg-m-rotorWind" class="text-right">—</span>
+
+                                <span>Rotor interference</span>
+                                <span id="tg-f-rotorInterference" class="text-right">—</span>
+                                <span id="tg-m-rotorInterference" class="text-right">—</span>
+
+                                <span>Ground effect</span>
+                                <span id="tg-f-groundEffect" class="text-right">—</span>
+                                <span id="tg-m-groundEffect" class="text-right">—</span>
+
+                                <span>Download</span>
+                                <span id="tg-f-download" class="text-right">—</span>
+                                <span id="tg-m-download" class="text-right">—</span>
+
+                                <span>Added mass</span>
+                                <span id="tg-f-addedMass" class="text-right">—</span>
+                                <span id="tg-m-addedMass" class="text-right">—</span>
+
+                                <span>Unsteady lift</span>
+                                <span id="tg-f-unsteadyLift" class="text-right">—</span>
+                                <span id="tg-m-unsteadyLift" class="text-right">—</span>
+
+                                <span>Buoyancy</span>
+                                <span id="tg-f-buoyancy" class="text-right">—</span>
+                                <span id="tg-m-buoyancy" class="text-right text-slate-600">—</span>
+
+                                <span>Coriolis</span>
+                                <span id="tg-f-coriolis" class="text-right">—</span>
+                                <span id="tg-m-coriolis" class="text-right text-slate-600">—</span>
+
+                                <span>Compressibility</span>
+                                <span id="tg-f-compressibility" class="text-right">—</span>
+                                <span id="tg-m-compressibility" class="text-right">—</span>
+
+                                <span class="text-white font-bold border-t border-slate-800 pt-1 mt-1">Net |F|,
+                                    |τ|</span>
+                                <span id="tg-f-total"
+                                    class="text-right text-white font-bold border-t border-slate-800 pt-1 mt-1">0.000</span>
+                                <span id="tg-m-total"
+                                    class="text-right text-white font-bold border-t border-slate-800 pt-1 mt-1">0.000</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="bar-chart-3" class="w-4 h-4 text-cyan-400"></i>
+                            <span>Per-Toggle Force Magnitudes (N)</span>
+                        </h3>
+                        <div class="w-full h-56 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                            <canvas id="toggleForceChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="bar-chart-3" class="w-4 h-4 text-violet-400"></i>
+                            <span>Per-Toggle Torque Magnitudes (N·m)</span>
+                        </h3>
+                        <div class="w-full h-56 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                            <canvas id="toggleTorqueChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-2">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="repeat" class="w-4 h-4 text-amber-400"></i>
+                            <span>Integrator</span>
+                        </h3>
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Physics substeps / frame</span>
+                                <span id="disp-substeps" class="font-mono">5</span>
+                            </div>
+                            <input type="range" id="cfg-substeps" min="1" max="20" step="1" value="5" class="w-full">
+                            <p class="text-[9px] text-slate-500 mt-1 leading-snug">
+                                5 substeps @ 20 Hz frame = 100 Hz physics — matches audit §6 recommendation.
+                                Increase to 10 (200 Hz) for RK4-equivalent accuracy.
+                            </p>
+                        </div>
+                    </div>
+
+
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
                         <h3 class="font-bold text-slate-200 flex items-center space-x-1.5"><i data-lucide="waves"
                                 class="w-4 h-4 text-cyan-400"></i><span>Near-Field Disturbance</span></h3>
                         <label class="flex items-center space-x-2 text-slate-300 font-medium cursor-pointer">
@@ -1054,6 +1394,8 @@
                         </div>
                     </div>
 
+
+
                     <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
                         <h3 class="font-bold text-slate-200 flex items-center space-x-1.5"><i data-lucide="wind"
                                 class="w-4 h-4 text-sky-400"></i><span>Near-Field Streamlines</span></h3>
@@ -1073,6 +1415,69 @@
                                     id="disp-near-box" class="font-mono">1.60</span></div>
                             <input type="range" id="cfg-near-box" min="0.8" max="3" step="0.1" value="1.6"
                                 class="w-full">
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-800 space-y-3">
+                        <h3 class="font-bold text-slate-200 flex items-center space-x-1.5">
+                            <i data-lucide="arrow-up-from-line" class="w-4 h-4 text-orange-400"></i>
+                            <span>Surface Force Vectors</span>
+                        </h3>
+                        <p class="text-[10px] text-slate-500 leading-snug">
+                            Per-triangle arrows anchored at the face centroid. Toggle the heatmap direction-color to
+                            split the surface by force vector instead of magnitude.
+                        </p>
+
+                        <label class="flex items-center space-x-2 text-slate-300 font-medium cursor-pointer">
+                            <input type="checkbox" id="cfg-surface-arrows-enabled"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Show force arrows</span>
+                        </label>
+
+                        <div>
+                            <label class="text-[10px] text-slate-400 block mb-1">Force component</label>
+                            <select id="cfg-surface-arrow-mode"
+                                class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200">
+                                <option value="combined">Combined (pressure + shear) · yellow</option>
+                                <option value="pressure">Pressure only · red</option>
+                                <option value="shear">Shear only · blue</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Density (every Nth face)</span>
+                                <span id="disp-surface-arrow-stride" class="font-mono">3</span>
+                            </div>
+                            <input type="range" id="cfg-surface-arrow-stride" min="1" max="20" step="1" value="3"
+                                class="w-full">
+                            <div class="flex justify-between text-[10px] text-slate-500 mt-0.5">
+                                <span>visible:</span><span id="disp-surface-arrow-count" class="font-mono">0
+                                    arrows</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Max arrow length (m)</span>
+                                <span id="disp-surface-arrow-len" class="font-mono">0.15</span>
+                            </div>
+                            <input type="range" id="cfg-surface-arrow-len" min="0.02" max="0.5" step="0.01" value="0.15"
+                                class="w-full">
+                        </div>
+
+                        <label
+                            class="flex items-center space-x-2 text-slate-300 text-[10px] cursor-pointer pt-2 border-t border-slate-800">
+                            <input type="checkbox" id="cfg-surface-direction-color"
+                                class="rounded border-slate-700 bg-slate-950 text-blue-500 w-4 h-4">
+                            <span>Color faces by force <em>direction</em></span>
+                        </label>
+                        <div class="text-[9px] text-slate-500 font-mono leading-snug">
+                            <span style="color:#f87171">■ +X</span>
+                            <span style="color:#4ade80">■ +Y</span>
+                            <span style="color:#60a5fa">■ +Z</span>
+                            · dark halves = negative axis
+                            <span class="text-slate-600">(normal-map convention)</span>
                         </div>
                     </div>
 
@@ -1281,7 +1686,118 @@
             rho: 1.225,
             rotorArmX: 0.17, rotorArmZ: 0.17,     // from arm_lengths
             spinDir: [-1, 1, -1, 1],      // from directions
+
+            // ── Paper (arXiv:2601.13971v2) additions ──
+            alpha_sep: Math.PI / 2,          // separation angle (rad), tunable
+            usePaperModel: false,             // toggles new pressure + sep criterion
+            useAddedMass: false,              // toggles added inertia
+            m_add: { x: 0, y: 0, z: 0 },      // kg — filled by computeAddedMassFromBounds()
+            J_add: { x: 0, y: 0, z: 0 },      // kg·m² — filled by computeAddedMassFromBounds()
+
+
+            // ── Force toggles (audit §9) ──
+            useRotorWindCoupling: false,   // T_eff = T · v_i / √(V⊥² + v_i²)
+            useRotorInterference: false,   // neighbor thrust mixing
+            useGroundEffect: false,        // T_IGE = T / (1 - (R/4z)²)
+            useDownload: false,            // forward-flight self-induction
+            useUnsteadyLift: false,        // Wagner lag on surface force
+            useBuoyancy: false,            // thermal buoyancy
+            useCoriolis: false,            // Earth rotation
+            useCompressibility: false,     // Prandtl-Glauert (negligible)
+
+            // ── Parameters for new forces ──
+            rotorInterferenceFactor: 0.12,   // 12% neighbor mixing
+            downloadFactor: 0.10,            // 10% per unit V∥/v_i
+            buoyancyDeltaT: 5.0,             // K (drone warmer than ambient)
+            ambientTemp: 293.0,              // K
+            earthLatitude: 0.0,              // degrees
+            wagnerTau: 0.05,                 // s (Wagner characteristic time)
+            bodyVolume: 0.001,               // m³ — filled by computeAddedMassFromBounds()
+
+            // ---- flat-plate skin-friction model (Approach 3) ----
+    skinFrictionModel: 'constant',   // 'constant' | 'reynolds'
+    dynamicViscosity: 1.81e-5,       // Pa·s, standard air at 15 °C
+    ReCrit: 5.0e5,                   // laminar→turbulent transition
+    plateLengthMode: 'triangle',     // 'triangle' (√A) | 'fixed'
+    plateLength: 0.30,               // m, only used when mode='fixed'
+
         };
+
+        const forceLagState = {
+            wagnerPhi: 1.0,                          // 1.0 = settled, 0.5 = new transient
+            lastSurfaceForce: new THREE.Vector3(),
+        };
+
+        let physicsSubsteps = 5;                     // integrator (audit §6)
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Per-toggle magnitude tracking
+        // ═══════════════════════════════════════════════════════════════════
+        const TOGGLE_KEYS = [
+            'surfaceForce', 'paperPressure', 'rotorWind', 'rotorInterference',
+            'groundEffect', 'download', 'addedMass', 'unsteadyLift',
+            'buoyancy', 'coriolis', 'compressibility'
+        ];
+
+        const TOGGLE_COLORS = {
+            surfaceForce: '#f43f5e',   // rose
+            paperPressure: '#6366f1',   // indigo
+            rotorWind: '#10b981',   // emerald
+            rotorInterference: '#14b8a6',   // teal
+            groundEffect: '#f59e0b',   // amber
+            download: '#f97316',   // orange
+            addedMass: '#06b6d4',   // cyan
+            unsteadyLift: '#a855f7',   // violet
+            buoyancy: '#0ea5e9',   // sky
+            coriolis: '#8b5cf6',   // purple
+            compressibility: '#d946ef',   // fuchsia
+        };
+
+        const TOGGLE_LABELS = {
+            surfaceForce: 'Surface forces',
+            paperPressure: 'Paper pressure',
+            rotorWind: 'Rotor-wind',
+            rotorInterference: 'Rotor interference',
+            groundEffect: 'Ground effect',
+            download: 'Download',
+            addedMass: 'Added mass',
+            unsteadyLift: 'Unsteady lift',
+            buoyancy: 'Buoyancy',
+            coriolis: 'Coriolis',
+            compressibility: 'Compressibility',
+        };
+
+        const toggleMag = {};
+        TOGGLE_KEYS.forEach(k => toggleMag[k] = { F: 0, M: 0 });
+        toggleMag.total = { F: 0, M: 0 };
+        toggleMag.dragComparison = { lumped: 0, surface: 0 };   // always-computed, for HUD ratio & chart
+
+        const toggleHistory = { times: [] };
+        TOGGLE_KEYS.forEach(k => {
+            toggleHistory[k + '_F'] = [];
+            toggleHistory[k + '_M'] = [];
+        });
+
+        let lastToggleChartPush = -1;
+        let toggleForceChart = null;
+        let toggleTorqueChart = null;
+
+        function isToggleActive(k) {
+            switch (k) {
+                case 'surfaceForce': return ctrlConfig.useSurfaceForces;
+                case 'paperPressure': return dronePhys.usePaperModel;
+                case 'rotorWind': return dronePhys.useRotorWindCoupling;
+                case 'rotorInterference': return dronePhys.useRotorInterference;
+                case 'groundEffect': return dronePhys.useGroundEffect;
+                case 'download': return dronePhys.useDownload;
+                case 'addedMass': return dronePhys.useAddedMass;
+                case 'unsteadyLift': return dronePhys.useUnsteadyLift;
+                case 'buoyancy': return dronePhys.useBuoyancy;
+                case 'coriolis': return dronePhys.useCoriolis;
+                case 'compressibility': return dronePhys.useCompressibility;
+            }
+            return false;
+        }
 
         // Body-frame rotor positions (from `buildDefaultDroneModel`)
         let rotorLocalOffsets = [
@@ -1301,6 +1817,72 @@
             lastThrustCmd: 0,                         // last commanded collective
             lastTorqueCmd: new THREE.Vector3(),       // last commanded body torque
         };
+
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Added mass from body geometry (paper §2.2 — potential-flow inertia)
+        // ═══════════════════════════════════════════════════════════════════════
+        function computeAddedMassFromBounds() {
+            if (!droneMesh || !droneMesh.geometry) {
+                dronePhys.m_add = { x: 0, y: 0, z: 0 };
+                dronePhys.J_add = { x: 0, y: 0, z: 0 };
+                return;
+            }
+            droneMesh.geometry.computeBoundingBox();
+            const size = droneMesh.geometry.boundingBox.getSize(new THREE.Vector3());
+
+            // Ellipsoid volume approximation (a·b·c form, π/6 factor)
+            const V = (Math.PI / 6) * size.x * size.y * size.z;
+
+            dronePhys.bodyVolume = V;
+
+            // Per-axis added-mass coefficient C_A (fraction of ρ_air·V):
+            //   vertical (Y, thrust axis): plate-like → ~0.5
+            //   horizontal (X, Z):         streamlined → ~0.15
+            // These are classical potential-flow values for ellipsoids with
+            // aspect ratios similar to a quadrotor (flat & wide).
+            const k_horiz = 0.15;
+            const k_vert = 0.50;
+
+            dronePhys.m_add = {
+                x: dronePhys.rho * V * k_horiz,
+                y: dronePhys.rho * V * k_vert,
+                z: dronePhys.rho * V * k_horiz,
+            };
+
+            // Added rotational inertia — moment of the displaced fluid mass
+            //   J_add ≈ m_add · ⟨r²⟩ with r ~ half-extent perpendicular to axis
+            const r2_x = (size.y * size.y + size.z * size.z) / 12;
+            const r2_y = (size.x * size.x + size.z * size.z) / 12;
+            const r2_z = (size.x * size.x + size.y * size.y) / 12;
+
+            dronePhys.J_add = {
+                x: dronePhys.m_add.x * r2_x + dronePhys.m_add.y * r2_x + dronePhys.m_add.z * r2_x,
+                y: dronePhys.m_add.x * r2_y + dronePhys.m_add.y * r2_y + dronePhys.m_add.z * r2_y,
+                z: dronePhys.m_add.x * r2_z + dronePhys.m_add.y * r2_z + dronePhys.m_add.z * r2_z,
+            };
+
+            // For a typical 0.4 × 0.1 × 0.4 drone this gives:
+            //   m_add ≈ (0.002, 0.005, 0.002) kg  — ~1–3 % of dry mass
+            //   J_add ≈ (2e-5, 3e-5, 2e-5) kg·m² — small but real
+            updateAddedMassHUD();
+        }
+
+        function updateAddedMassHUD() {
+            const mEl = document.getElementById('hud-m-add');
+            if (mEl) mEl.textContent = `[${dronePhys.m_add.x.toFixed(4)}, ${dronePhys.m_add.y.toFixed(4)}, ${dronePhys.m_add.z.toFixed(4)}]`;
+            const jEl = document.getElementById('hud-J-add');
+            if (jEl) jEl.textContent = `[${(dronePhys.J_add.x * 1e5).toFixed(1)}e-5, ${(dronePhys.J_add.y * 1e5).toFixed(1)}e-5, ${(dronePhys.J_add.z * 1e5).toFixed(1)}e-5]`;
+            const mEff = document.getElementById('hud-m-eff');
+            if (mEff) {
+                const useAdd = dronePhys.useAddedMass;
+                const mx = dronePhys.mass + (useAdd ? dronePhys.m_add.x : 0);
+                const my = dronePhys.mass + (useAdd ? dronePhys.m_add.y : 0);
+                const mz = dronePhys.mass + (useAdd ? dronePhys.m_add.z : 0);
+                mEff.textContent = `[${mx.toFixed(3)}, ${my.toFixed(3)}, ${mz.toFixed(3)}] kg`;
+            }
+        }
+
 
         // ============================================================
         // Velocity / acceleration envelope from current physics
@@ -1357,6 +1939,12 @@
             rho: 1.225,
             rotorArmX: 0.17, rotorArmZ: 0.17,            // from arm_lengths
             spinDir: [-1, 1, -1, 1],                     // from directions
+            // ---- flat-plate skin-friction model (Approach 3) ----
+    skinFrictionModel: 'constant',   // 'constant' | 'reynolds'
+    dynamicViscosity: 1.81e-5,       // Pa·s, standard air at 15 °C
+    ReCrit: 5.0e5,                   // laminar→turbulent transition
+    plateLengthMode: 'triangle',     // 'triangle' (√A) | 'fixed'
+    plateLength: 0.30,               // m, only used when mode='fixed'
         };
 
 
@@ -1391,10 +1979,23 @@
             loop: false,
         };
 
+        const surfaceForceViz = {
+            enabled: false,
+            arrowMode: 'combined',   // 'combined' | 'pressure' | 'shear'
+            stride: 3,               // sample every Nth triangle for arrows
+            maxArrowLen: 0.15,       // meters, longest arrow
+            directionColor: false,   // recolor faces by force direction
+        };
+        let surfaceForceArrowMesh = null;
+        let surfaceForceArrowPositions = null;
+        let surfaceForceArrowColors = null;
+        let surfaceForceArrowCapacity = 0;
+        let lastSurfaceSamples = null;
+
         const visualConfig = {
             vectorFieldEnabled: false,
             gridDensity: 5, arrowScale: 0.4, headLength: 0.25, headWidth: 0.2,
-            heatmapColorMap: 'jet', maxStress: 10,
+            heatmapColorMap: 'jet', maxStress: 3,
             particlesEnabled: false, particleCount: 800, particleSpeed: 1.0, particleSize: 0.08,
             domainSize: 10,
         };
@@ -1623,45 +2224,45 @@
             if (trajConfig.mode === 'manual') return { pos: new THREE.Vector3(...trajConfig.manualPos), vel: new THREE.Vector3(...trajConfig.manualVel), acc: new THREE.Vector3(), yaw: trajConfig.manualYaw * Math.PI / 180 };
             return getWaypointReference(t);
         }
-         function validateWaypointTrajectory() {
-                const limit = computeSpeedAccelLimits(0.75);
-                const wps = trajConfig.waypoints;
-                const wpWarnings = new Set();
-                const segWarnings = new Map();   // segment index → reason
-                const segPeaks = [];             // {segIdx, peakV, peakA}
-                let overallPeak = 0;
+        function validateWaypointTrajectory() {
+            const limit = computeSpeedAccelLimits(0.75);
+            const wps = trajConfig.waypoints;
+            const wpWarnings = new Set();
+            const segWarnings = new Map();   // segment index → reason
+            const segPeaks = [];             // {segIdx, peakV, peakA}
+            let overallPeak = 0;
 
-                if (wps.length === 0) return { limit, wpWarnings, segWarnings, segPeaks, overallPeak };
+            if (wps.length === 0) return { limit, wpWarnings, segWarnings, segPeaks, overallPeak };
 
-                // Waypoint velocity check
-                wps.forEach((wp, i) => {
-                    const s = Math.hypot(...(wp.vel || [0, 0, 0]));
-                    if (s > limit.V_max) wpWarnings.add(i);
-                });
+            // Waypoint velocity check
+            wps.forEach((wp, i) => {
+                const s = Math.hypot(...(wp.vel || [0, 0, 0]));
+                if (s > limit.V_max) wpWarnings.add(i);
+            });
 
-                // Segment sample
-                if (wps.length >= 2) {
-                    const cumT = [0];
-                    for (let i = 1; i < wps.length; i++) cumT.push(cumT[i - 1] + Math.max(0.2, wps[i].time || 2));
+            // Segment sample
+            if (wps.length >= 2) {
+                const cumT = [0];
+                for (let i = 1; i < wps.length; i++) cumT.push(cumT[i - 1] + Math.max(0.2, wps[i].time || 2));
 
-                    for (let i = 0; i < wps.length - 1; i++) {
-                        const T = cumT[i + 1] - cumT[i];
-                        const N = 60;
-                        let peakV = 0, peakA = 0;
-                        for (let k = 0; k <= N; k++) {
-                            const ref = getWaypointReference(trajConfig.anchorTime + cumT[i] + (k / N) * T);
-                            const v = ref.vel.length();
-                            const a = ref.acc ? ref.acc.length() : 0;
-                            if (v > peakV) peakV = v;
-                            if (a > peakA) peakA = a;
-                        }
-                        segPeaks.push({ segIdx: i, peakV, peakA });
-                        if (peakV > limit.V_max) segWarnings.set(i, `peak |v|=${peakV.toFixed(1)} > ${limit.V_max.toFixed(1)}`);
-                        if (peakV > overallPeak) overallPeak = peakV;
+                for (let i = 0; i < wps.length - 1; i++) {
+                    const T = cumT[i + 1] - cumT[i];
+                    const N = 60;
+                    let peakV = 0, peakA = 0;
+                    for (let k = 0; k <= N; k++) {
+                        const ref = getWaypointReference(trajConfig.anchorTime + cumT[i] + (k / N) * T);
+                        const v = ref.vel.length();
+                        const a = ref.acc ? ref.acc.length() : 0;
+                        if (v > peakV) peakV = v;
+                        if (a > peakA) peakA = a;
                     }
+                    segPeaks.push({ segIdx: i, peakV, peakA });
+                    if (peakV > limit.V_max) segWarnings.set(i, `peak |v|=${peakV.toFixed(1)} > ${limit.V_max.toFixed(1)}`);
+                    if (peakV > overallPeak) overallPeak = peakV;
                 }
-                return { limit, wpWarnings, segWarnings, segPeaks, overallPeak };
             }
+            return { limit, wpWarnings, segWarnings, segPeaks, overallPeak };
+        }
 
         function getWaypointReference(t) {
             const wps = trajConfig.waypoints;
@@ -1680,7 +2281,7 @@
      *   - per-segment peak velocity and peak acceleration
      * Returns { limit, wpWarnings:Set, segWarnings:Map, segPeaks:[], overallPeak }
      */
-           
+
 
             const cumT = [0];
             for (let i = 1; i < wps.length; i++) cumT.push(cumT[i - 1] + Math.max(0.2, wps[i].time || 2));
@@ -1966,10 +2567,53 @@
         let lastSurfaceM = new THREE.Vector3();
         let lastMaxPressure = 0;
 
+        // NEW: per-frame flat-plate diagnostics, used by the HUD
+const lastSurfaceDiag = {
+    avgRe: 0,      // surface-area-weighted average Reynolds number (0 if not in reynolds mode)
+    avgCf: 0,      // surface-area-weighted average Cf
+    model: 'constant',
+    drag_N: 0,     // vehicle-level aero drag (in flow direction)
+    lift_N: 0,     // vehicle-level aero lift (perpendicular to flow)
+};
+
+/**
+ * Average skin-friction coefficient for a smooth flat plate at Reynolds Re,
+ * using the Approach-3 correlations with a smooth laminar→turbulent transition.
+ *
+ *   laminar  (Re ≤ Re_crit)              :  Cf = 1.328 / √Re          (Blasius)
+ *   turbulent (Re > Re_crit)             :  Cf = 0.074/Re^0.2 − 1742/Re  (Schlichting)
+ *
+ * The two branches match at Re_crit = 5e5 (0.00188) so the switch is continuous.
+ */
+function computeSkinFrictionCf(Re) {
+    if (!isFinite(Re) || Re < 1e3) return 0.0;
+    if (Re <= dronePhys.ReCrit) {
+        return 1.328 / Math.sqrt(Re);
+    }
+    const Cf_turb = 0.074 / Math.pow(Re, 0.2);
+    const Cf_corr = 1742.0 / Re;
+    return Math.max(0.0005, Cf_turb - Cf_corr);   // don't return pathological values
+}
+
         function computeSurfaceForcesAndColors() {
             const F_W = new THREE.Vector3();
             const M_W = new THREE.Vector3();
             let maxP = 0;
+
+             // NEW: flat-plate tracking
+    const useReynoldsCf = (dronePhys.skinFrictionModel === 'reynolds');
+    const Cf_const = dronePhys.CfSurface;
+    let reSumA = 0, cfSumA = 0, areaSum = 0;
+
+    if (!droneMesh || !droneMesh.geometry) {
+        lastSurfaceF.copy(F_W);
+        lastSurfaceM.copy(M_W);
+        lastMaxPressure = 0;
+        lastSurfaceDiag.avgRe = 0;
+        lastSurfaceDiag.avgCf = 0;
+        lastSurfaceDiag.model = useReynoldsCf ? 'reynolds' : 'constant';
+        return { F_W, M_W, maxP };
+    }
 
             if (!droneMesh || !droneMesh.geometry) {
                 lastSurfaceF.copy(F_W); lastSurfaceM.copy(M_W); lastMaxPressure = 0;
@@ -1995,6 +2639,7 @@
             const vSurfOmega = new THREE.Vector3();
             const vSurf = new THREE.Vector3();
             const vRel = new THREE.Vector3();
+            const vRelHat = new THREE.Vector3();
             const vTan = new THREE.Vector3();
             const fP = new THREE.Vector3();
             const fS = new THREE.Vector3();
@@ -2004,8 +2649,16 @@
             const rho = dronePhys.rho;
             const Cp = dronePhys.CpSurface;
             const Cf = dronePhys.CfSurface;
+            const samples = [];   // populated only when surfaceForceViz.enabled
+
+
+            // ── Paper model parameters ──
+            const usePaper = dronePhys.usePaperModel;
+            const alphaSep = dronePhys.alpha_sep;
+            const cosAlphaSep = -Math.cos(alphaSep);   // boundary of attached region
 
             for (let i = 0; i < numVerts; i += 3) {
+                // ── Face centroid and outward normal (world frame) ──
                 vPos.set(
                     (posAttr.getX(i) + posAttr.getX(i + 1) + posAttr.getX(i + 2)) / 3,
                     (posAttr.getY(i) + posAttr.getY(i + 1) + posAttr.getY(i + 2)) / 3,
@@ -2013,25 +2666,19 @@
                 ).applyMatrix4(mW);
                 vNorm.set(normAttr.getX(i), normAttr.getY(i), normAttr.getZ(i)).applyMatrix3(nMat).normalize();
 
+                // ── Surface velocity = v_cg + ω × r ──
                 rTmp.subVectors(vPos, droneDyn.pos);
                 vSurfOmega.crossVectors(omegaW, rTmp);
                 vSurf.copy(droneDyn.vel).add(vSurfOmega);
 
+                // ── Ambient wind at face (excludes body wake — paper §2.3) ──
                 const wv = evaluateWindVelocity(vPos.x, vPos.y, vPos.z, simTime, true);
                 vRel.set(wv[0] - vSurf.x, wv[1] - vSurf.y, wv[2] - vSurf.z);
                 const vRelMag = vRel.length();
 
                 let stress = 0;
                 if (vRelMag > 0.01) {
-                    const hx = vRel.x / vRelMag, hy = vRel.y / vRelMag, hz = vRel.z / vRelMag;
-                    // Signed normal flux (positive = flow INTO surface i.e. leeward)
-                    const dotHN = hx * vNorm.x + hy * vNorm.y + hz * vNorm.z;
-                    const q = 0.5 * rho * vRelMag * vRelMag;
-
-                    // Windward pressure: |d|² on the windward side (dotHN < 0)
-                    const dPress = Math.max(0, -dotHN);
-                    const p_j = Cp * q * dPress * dPress;
-
+                    // ── Face geometry ──
                     // Pressure force = -p_j * A * n̂ (inward normal)
                     // Tangential shear force = ½ρ·C_f·A·|v_t|·v_t
                     pA.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
@@ -2040,11 +2687,63 @@
                     ab.subVectors(pB, pA); ac.subVectors(pC, pA);
                     const faceArea = ab.cross(ac).length() * 0.5;
 
+                    // ── Flow direction and surface angle ──
+                    vRelHat.copy(vRel).divideScalar(vRelMag);
+                    const nDotH = vNorm.dot(vRelHat);         // = cos(angle between n and flow)
+                    const q = 0.5 * rho * vRelMag * vRelMag;
+
+
+                    let p_j;
+                    if (usePaper) {
+                        // ── Paper (arXiv:2601.13971v2) ──
+                        // Attached if angle from stagnation < α →  n·ĥ < -cos(α)
+                        // Pressure uses |n·ĥ|² for both windward and attached-leeward:
+                        //   windward  (n·ĥ < 0):  pressure ~ stagnation × cos²(angle from stag)
+                        //   leeward-attached (0 < n·ĥ < -cos α):  small positive pressure
+                        //   separated (n·ĥ ≥ -cos α):  no pressure (wake)
+                        if (nDotH < cosAlphaSep) {
+                            p_j = Cp * q * nDotH * nDotH;      // |n·ĥ|² ≡ (n·ĥ)²
+                        } else {
+                            p_j = 0;
+                        }
+                    } else {
+                        // ── Original heuristic (preserved for toggle-off) ──
+                        // Windward pressure: |d|² on the windward side (dotHN < 0)
+                        const dPress = Math.max(0, -nDotH);
+                        p_j = Cp * q * dPress * dPress;
+                    }
+
+
+
+
+
+                    // ── Pressure force:  -p_j·A·n̂  (pushes inward) ──
                     fP.copy(vNorm).multiplyScalar(-p_j * faceArea);
 
+
+                    // ── Tangential shear:  ½ρ·C_f·A·|v_t|·v_t ──
                     vTan.copy(vRel).addScaledVector(vNorm, -vRel.dot(vNorm));
                     const vTanMag = vTan.length();
-                    fS.copy(vTan).multiplyScalar(0.5 * rho * Cf * faceArea * vTanMag);
+
+                     // ─── skin friction with per-triangle Cf ──────
+                    let Cf_used = Cf_const;
+                    if (useReynoldsCf && vTanMag > 1e-3) {
+                        // Characteristic length: √A (per-triangle proxy) or a fixed length
+                        const L_char = (dronePhys.plateLengthMode === 'fixed')
+                            ? Math.max(0.01, dronePhys.plateLength)
+                            : Math.max(1e-3, Math.sqrt(faceArea));
+                        const Re = rho * vTanMag * L_char
+                                 / Math.max(1e-9, dronePhys.dynamicViscosity);
+                        Cf_used = computeSkinFrictionCf(Re);
+                        reSumA += Re * faceArea;
+                        cfSumA += Cf_used * faceArea;
+                        areaSum += faceArea;
+                    }
+
+                    fS.copy(vTan).multiplyScalar(
+                        0.5 * rho * Cf_used * faceArea * vTanMag
+                    );
+                    
 
                     fTri.copy(fP).add(fS);
                     stress = fTri.length() / Math.max(1e-9, faceArea);
@@ -2056,18 +2755,56 @@
                     if (stress > maxP) maxP = stress;
                 }
 
-                getColorForHeatmap(stress, visualConfig.maxStress, _heatColor);
+                // ── Arrow sample collection (world-space centroid + per-component forces) ──
+                if (surfaceForceViz.enabled && vRelMag > 0.01) {
+                    samples.push({
+                        cx: vPos.x, cy: vPos.y, cz: vPos.z,
+                        fx: fTri.x, fy: fTri.y, fz: fTri.z,
+                        fpx: fP.x, fpy: fP.y, fpz: fP.z,
+                        fsx: fS.x, fsy: fS.y, fsz: fS.z,
+                    });
+                }
+
+                // ── Face color: direction mode overrides magnitude heatmap ──
+                if (surfaceForceViz.directionColor && vRelMag > 0.01) {
+                    const fm = fTri.length();
+                    if (fm > 1e-6) {
+                        // Normalize to unit, map [-1,1] → [0,1] per axis
+                        _heatColor.setRGB(
+                            (fTri.x / fm + 1) * 0.5,
+                            (fTri.y / fm + 1) * 0.5,
+                            (fTri.z / fm + 1) * 0.5
+                        );
+                    } else {
+                        _heatColor.setRGB(0.5, 0.5, 0.5);
+                    }
+                } else {
+                    getColorForHeatmap(stress, visualConfig.maxStress, _heatColor);
+                }
                 colorAttr.setXYZ(i, _heatColor.r, _heatColor.g, _heatColor.b);
                 colorAttr.setXYZ(i + 1, _heatColor.r, _heatColor.g, _heatColor.b);
                 colorAttr.setXYZ(i + 2, _heatColor.r, _heatColor.g, _heatColor.b);
             }
 
-            if (colorAttr.needsUpdate !== undefined) colorAttr.needsUpdate = true;
+            colorAttr.needsUpdate = true;
 
             lastSurfaceF.copy(F_W);
             lastSurfaceM.copy(M_W);
             lastMaxPressure = maxP;
+
+
+            if (useReynoldsCf && areaSum > 0) {
+                lastSurfaceDiag.avgRe = reSumA / areaSum;
+                lastSurfaceDiag.avgCf = cfSumA / areaSum;
+            } else {
+                lastSurfaceDiag.avgRe = 0;
+                lastSurfaceDiag.avgCf = useReynoldsCf ? Cf_const : Cf_const;
+            }
+            lastSurfaceDiag.model = useReynoldsCf ? 'reynolds' : 'constant';
+            lastSurfaceSamples = surfaceForceViz.enabled ? samples : null;
+
             return { F_W, M_W, maxP };
+
         }
 
         // ============================================================
@@ -2079,15 +2816,17 @@
             torqueCmd: new THREE.Vector3(),
         };
 
-        function stepDynamics(dt) {
+        function stepDynamics(dt, isLastSubstep = true) {
             if (dt <= 0) return;
 
             // --- 0. Sync mesh transform from current state (for surface force calc) ---
             droneGroup.position.copy(droneDyn.pos);
             droneGroup.quaternion.copy(droneDyn.quat);
             droneGroup.updateMatrixWorld(true);
+
             // Update rotor world positions for downwash
             rotorPositionsWorld = [];
+
             for (let i = 0; i < 4; i++) {
                 rotorPositionsWorld.push(rotorLocalOffsets[i].clone().applyMatrix4(droneGroup.matrixWorld));
             }
@@ -2154,38 +2893,125 @@
                 droneDyn.omega_rotors[i] += (omegaCmds[i] - droneDyn.omega_rotors[i]) * alpha;
             }
 
-            // --- 6. Actual per-rotor forces and body moments from Ω_i ---
-            const F_T_W = new THREE.Vector3();
-            const tau_rotors_B = new THREE.Vector3();
-            const rotorThrusts = [0, 0, 0, 0];
+            // --- 6. Per-rotor thrust with all aero corrections ---
             const rotorRadii = dronePhys.rotorRadius;
             const rotorArea = Math.PI * rotorRadii * rotorRadii;
 
+            // Relative airspeed at CG (skip disturbance for stability)
+            const wv_cg = evaluateWindVelocity(droneDyn.pos.x, droneDyn.pos.y, droneDyn.pos.z, simTime, true);
+             // v_rel = velocity of body relative to air (standard drag convention)
+            const vRelCG = new THREE.Vector3(
+                droneDyn.vel.x - wv_cg[0],
+                droneDyn.vel.y - wv_cg[1],
+                droneDyn.vel.z - wv_cg[2]
+            );
+            const qInv_cg = droneDyn.quat.clone().invert();
+            const vRelBody = vRelCG.clone().applyQuaternion(qInv_cg);
+
+            // Thrust axis = body +Y. Perpendicular = body X,Z
+            const V_perp = Math.sqrt(vRelBody.x * vRelBody.x + vRelBody.z * vRelBody.z);
+            const V_par = Math.abs(vRelBody.y);
+
+
+            // ── Pass 1: raw thrust per rotor with per-rotor corrections ──
+            const rawT = [0, 0, 0, 0];
+            const Q_rotors = [0, 0, 0, 0];
+            // Per-toggle delta accumulators (for magnitude display)
+            const rotorWindDeltaF = new THREE.Vector3();
+            const rotorWindDeltaM = new THREE.Vector3();
+            const rotorInterferenceDeltaF = new THREE.Vector3();
+            const rotorInterferenceDeltaM = new THREE.Vector3();
+            const groundEffectDeltaF = new THREE.Vector3();
+            const groundEffectDeltaM = new THREE.Vector3();
+            const downloadDeltaF = new THREE.Vector3();
+            const downloadDeltaM = new THREE.Vector3();
+            const compressibilityDeltaF = new THREE.Vector3();
+            const compressibilityDeltaM = new THREE.Vector3();
+
+
             for (let i = 0; i < 4; i++) {
-                const T_i = dronePhys.kT * droneDyn.omega_rotors[i] * droneDyn.omega_rotors[i];
-                const Q_i = dronePhys.kQ * droneDyn.omega_rotors[i] * droneDyn.omega_rotors[i];
+                const omega_i = droneDyn.omega_rotors[i];
+                let T_i = dronePhys.kT * omega_i * omega_i;
+                Q_rotors[i] = dronePhys.kQ * omega_i * omega_i;
+                const r_rotor = rotorLocalOffsets[i];
+
+                // (§4 Rank 2) Rotor-wind coupling: T ∝ v_i/√(V⊥²+v_i²)
+                if (dronePhys.useRotorWindCoupling) {
+                    const v_i = Math.sqrt(Math.max(0, T_i) / (2 * dronePhys.rho * rotorArea));
+                    const newT = T_i * (v_i / Math.sqrt(V_perp * V_perp + v_i * v_i + 1e-9));
+                    const dT = newT - T_i;
+                    rotorWindDeltaF.add(new THREE.Vector3(0, dT, 0).applyQuaternion(droneDyn.quat));
+                    rotorWindDeltaM.add(new THREE.Vector3(-r_rotor.z * dT, 0, r_rotor.x * dT));
+                    T_i = newT;
+                }
+
+                // (§3.5) Ground effect: T_IGE/T_OGE = 1/(1 - (R/4z)²)
+                if (dronePhys.useGroundEffect) {
+                    const zEff = Math.max(droneDyn.pos.y, 0.05);
+                    const r2 = Math.pow(rotorRadii / (4 * zEff), 2);
+                    if (r2 < 1.0) {
+                        const newT = T_i * Math.min(1.30, 1.0 / (1.0 - r2));
+                        const dT = newT - T_i;
+                        groundEffectDeltaF.add(new THREE.Vector3(0, dT, 0).applyQuaternion(droneDyn.quat));
+                        groundEffectDeltaM.add(new THREE.Vector3(-r_rotor.z * dT, 0, r_rotor.x * dT));
+                        T_i = newT;
+                    }
+                }
+
+                // (§5 Rank 6) Self-induced download: T ↓ proportional to V∥/v_i
+                if (dronePhys.useDownload && V_par > 0.1) {
+                    const v_i = Math.sqrt(Math.max(0, T_i) / (2 * dronePhys.rho * rotorArea));
+                    const penalty = Math.min(0.4, dronePhys.downloadFactor * V_par / (v_i + 1e-6));
+                    const newT = T_i * (1 - penalty);
+                    const dT = newT - T_i;
+                    downloadDeltaF.add(new THREE.Vector3(0, dT, 0).applyQuaternion(droneDyn.quat));
+                    downloadDeltaM.add(new THREE.Vector3(-r_rotor.z * dT, 0, r_rotor.x * dT));
+                    T_i = newT;
+                }
+
+                rawT[i] = T_i;
+            }
+
+            // ── (§3.3 Rank 5) Rotor-rotor interference ──
+            // Each rotor's thrust pulled toward its 2 neighbors' average by k.
+            // At hover, all equal → no change. During roll, asymmetric thrust is
+            // damped, producing the small yaw coupling the audit flags as missing.
+            if (dronePhys.useRotorInterference) {
+                const Tc = [...rawT];
+                const k = dronePhys.rotorInterferenceFactor;
+                for (let i = 0; i < 4; i++) {
+                    const nbAvg = 0.5 * (Tc[(i + 1) % 4] + Tc[(i + 3) % 4]);
+                    const newT = Tc[i] * (1 - k) + nbAvg * k;
+                    const dT = newT - Tc[i];
+                    const r_rotor = rotorLocalOffsets[i];
+                    rotorInterferenceDeltaF.add(new THREE.Vector3(0, dT, 0).applyQuaternion(droneDyn.quat));
+                    rotorInterferenceDeltaM.add(new THREE.Vector3(-r_rotor.z * dT, 0, r_rotor.x * dT));
+                    rawT[i] = newT;
+                }
+            }
+
+            // ── Pass 2: sum forces and torques from final rawT ──
+            const F_T_W = new THREE.Vector3();
+            const tau_rotors_B = new THREE.Vector3();
+            const rotorThrusts = [0, 0, 0, 0];
+
+            for (let i = 0; i < 4; i++) {
+                const T_i = rawT[i];
                 rotorThrusts[i] = T_i;
 
-                // Thrust force in body frame is (0, T_i, 0), transformed to world
                 const fW = new THREE.Vector3(0, T_i, 0).applyQuaternion(droneDyn.quat);
                 F_T_W.add(fW);
 
-                // Moment in body frame: r_i × (0, T_i, 0) + s_i*Q_i * ŷ
                 const r = rotorLocalOffsets[i];
                 tau_rotors_B.x += -r.z * T_i;
                 tau_rotors_B.z += r.x * T_i;
-                tau_rotors_B.y -= dronePhys.spinDir[i] * Q_i;
+                tau_rotors_B.y -= dronePhys.spinDir[i] * Q_rotors[i];
 
-                // Induced velocity (actuator disk) for downwash field
                 rotorInducedV[i] = Math.sqrt(Math.max(0, T_i) / (2 * dronePhys.rho * rotorArea));
             }
             ctrlTelemetry.rotorThrusts = rotorThrusts;
 
-            // --- 7. Body-frame drag (Section 3.1) ---
-            const wv_cg = evaluateWindVelocity(droneDyn.pos.x, droneDyn.pos.y, droneDyn.pos.z, simTime, true);
-            const vRelCG = new THREE.Vector3(wv_cg[0] - droneDyn.vel.x, wv_cg[1] - droneDyn.vel.y, wv_cg[2] - droneDyn.vel.z);
-            const qInv = droneDyn.quat.clone().invert();
-            const vRelBody = vRelCG.clone().applyQuaternion(qInv);
+            // --- 7. Body-frame lumped drag (only if surface forces NOT driving dynamics) ---
             const F_D_B = new THREE.Vector3(
                 -0.5 * dronePhys.rho * dronePhys.CxAx * Math.abs(vRelBody.x) * vRelBody.x,
                 -0.5 * dronePhys.rho * dronePhys.CyAy * Math.abs(vRelBody.y) * vRelBody.y,
@@ -2193,13 +3019,63 @@
             );
             const F_D_W = F_D_B.clone().applyQuaternion(droneDyn.quat);
 
-            // --- 8. Sum forces ---
+            // ── Vehicle-level aerodynamic drag/lift (flow-aligned decomposition) ──
+            // Airflow relative to CG: v_flow = v_air − v_body  (direction air moves past the drone)
+            const flow_air = evaluateWindVelocity(
+                droneDyn.pos.x, droneDyn.pos.y, droneDyn.pos.z, simTime, true);
+            const vFlow = new THREE.Vector3(
+                flow_air[0] - droneDyn.vel.x,
+                flow_air[1] - droneDyn.vel.y,
+                flow_air[2] - droneDyn.vel.z
+            );
+            const vFlowMag = vFlow.length();
+
+            if (vFlowMag > 0.05) {
+                const flowDir = vFlow.clone().divideScalar(vFlowMag);   // air-relative-to-body direction
+                // Total aero force (surface + body drag; excludes gravity and rotor thrust)
+                const aeroF = surf.F_W.clone();
+                if (!ctrlConfig.useSurfaceForces) aeroF.add(F_D_W);
+
+                // Drag: component along airflow (positive = resisting body motion)
+                const dragScalar = aeroF.dot(flowDir);
+                // Lift: perpendicular component magnitude
+                const liftVec = aeroF.clone().addScaledVector(flowDir, -dragScalar);
+
+                lastSurfaceDiag.drag_N = dragScalar;
+                lastSurfaceDiag.lift_N = liftVec.length();
+            } else {
+                lastSurfaceDiag.drag_N = 0;
+                lastSurfaceDiag.lift_N = 0;
+            }
+
+            // --- 8. Sum forces (translational) ---
+            // --- 8. Sum forces (translational) ---
             const F_g = new THREE.Vector3(0, -dronePhys.mass * dronePhys.gravity, 0);
             const F_total = new THREE.Vector3().add(F_T_W).add(F_g);
 
+            // --- (§3.2 Rank 3) Unsteady lift lag (Wagner) ---
+            let F_W_for_dynamics = surf.F_W.clone();
+
+            if (dronePhys.useUnsteadyLift) {
+                const lagAlpha = Math.min(1.0, dt / Math.max(0.005, dronePhys.wagnerTau));
+                const forceDelta = surf.F_W.clone().sub(forceLagState.lastSurfaceForce).length();
+                const forceMag = Math.max(0.1, surf.F_W.length());
+                if (forceDelta > 0.5 * forceMag) {
+                    // Step-like change in flow → new transient
+                    forceLagState.wagnerPhi = 0.5;
+                }
+                forceLagState.wagnerPhi += (1.0 - forceLagState.wagnerPhi) * lagAlpha;
+                F_W_for_dynamics.multiplyScalar(forceLagState.wagnerPhi);
+                forceLagState.lastSurfaceForce.copy(surf.F_W);
+            } else {
+                forceLagState.wagnerPhi = 1.0;
+                forceLagState.lastSurfaceForce.copy(surf.F_W);
+            }
+
+
             if (ctrlConfig.useSurfaceForces) {
                 // Surface forces drive dynamics (lumped drag disabled to avoid double-count)
-                F_total.add(surf.F_W);
+                F_total.add(F_W_for_dynamics);
             } else {
                 F_total.add(F_D_W);
             }
@@ -2207,17 +3083,37 @@
             // --- 9. Sum torques (body frame) ---
             const tau_total_B = tau_rotors_B.clone();
             if (ctrlConfig.useSurfaceForces) {
-                const tauSurfB = surf.M_W.clone().applyQuaternion(qInv);
+                const tauSurfB = surf.M_W.clone().applyQuaternion(qInv_cg);
+                if (dronePhys.useUnsteadyLift) tauSurfB.multiplyScalar(forceLagState.wagnerPhi);
                 tau_total_B.add(tauSurfB);
             }
 
-            // --- 10. Translational integration (semi-implicit Euler) ---
-            const acc = F_total.clone().multiplyScalar(1 / dronePhys.mass);
-            droneDyn.vel.addScaledVector(acc, dt);
+            // ── 10. Translational integration with added mass (semi-implicit Euler) ──
+            // Paper (arXiv:2601.13971v2 §2.1): effective inertia = body + fluid
+            const useAddedMass = dronePhys.useAddedMass;
+            const m_eff_x = dronePhys.mass + (useAddedMass ? dronePhys.m_add.x : 0);
+            const m_eff_y = dronePhys.mass + (useAddedMass ? dronePhys.m_add.y : 0);
+            const m_eff_z = dronePhys.mass + (useAddedMass ? dronePhys.m_add.z : 0);
+
+            // Solve in body frame (diagonal inertia), rotate result back
+            const F_body = F_total.clone().applyQuaternion(qInv_cg);
+            const a_body = new THREE.Vector3(
+                F_body.x / m_eff_x,
+                F_body.y / m_eff_y,
+                F_body.z / m_eff_z);
+            const a_world = a_body.clone().applyQuaternion(droneDyn.quat);
+
+            droneDyn.vel.addScaledVector(a_world, dt);
             droneDyn.pos.addScaledVector(droneDyn.vel, dt);
 
-            // --- 11. Rotational integration: Jω̇ = τ − ω × Jω ---
+            // --- 11. Rotational integration with added inertia Jω̇ = τ − ω × Jω---
             const J = dronePhys.inertia;
+            const Ja = dronePhys.J_add;
+            const J_eff_x = J.x + (useAddedMass ? Ja.x : 0);
+            const J_eff_y = J.y + (useAddedMass ? Ja.y : 0);
+            const J_eff_z = J.z + (useAddedMass ? Ja.z : 0);
+
+
             const Iw = new THREE.Vector3(J.x * droneDyn.omega.x, J.y * droneDyn.omega.y, J.z * droneDyn.omega.z);
             const gyro = new THREE.Vector3().crossVectors(droneDyn.omega, Iw);
             const dw = new THREE.Vector3(
@@ -2263,22 +3159,112 @@
             droneState.rotorRpm = (droneDyn.omega_rotors[0] || 0) * 60 / (2 * Math.PI);
             updateDownwashCones(meanInduced);
 
-            // --- 15. Diagnostics for surface forces (HUD) ---
-            const dEl = document.getElementById('hud-drag-mag');
-            if (dEl) dEl.textContent = surf.F_W.length().toFixed(2) + ' N';
-            const mEl = document.getElementById('hud-surface-mom');
-            if (mEl) mEl.textContent = `[${surf.M_W.x.toFixed(1)}, ${surf.M_W.y.toFixed(1)}, ${surf.M_W.z.toFixed(1)}]`;
-            const pEl = document.getElementById('hud-max-press');
-            if (pEl) pEl.textContent = surf.maxP.toFixed(2) + ' Pa';
+            // ---- Per-toggle magnitude tracking ----
+            if (isLastSubstep) {
+                // Surface forces
+                toggleMag.surfaceForce.F = ctrlConfig.useSurfaceForces ? surf.F_W.length() : 0;
+                toggleMag.surfaceForce.M = ctrlConfig.useSurfaceForces ? surf.M_W.length() : 0;
 
-            // Body drag
-            const dbEl = document.getElementById('hud-drag-body');
-            if (dbEl) dbEl.textContent = F_D_W.length().toFixed(2) + ' N';
-            const dbvEl = document.getElementById('hud-drag-body-vec');
-            if (dbvEl) dbvEl.textContent = `[${F_D_B.x.toFixed(1)}, ${F_D_B.y.toFixed(1)}, ${F_D_B.z.toFixed(1)}]`;
+                // Paper pressure (same magnitude as surface — visible only when paper model is ON)
+                toggleMag.paperPressure.F = dronePhys.usePaperModel ? surf.F_W.length() : 0;
+                toggleMag.paperPressure.M = dronePhys.usePaperModel ? surf.M_W.length() : 0;
 
-            if (isPlaying && forceChart) {
-                updateForceChart(simTime, F_D_W.length(), surf.M_W.length());
+                // Rotor corrections (deltas from baseline thrust)
+                toggleMag.rotorWind.F = rotorWindDeltaF.length();
+                toggleMag.rotorWind.M = rotorWindDeltaM.length();
+                toggleMag.rotorInterference.F = rotorInterferenceDeltaF.length();
+                toggleMag.rotorInterference.M = rotorInterferenceDeltaM.length();
+                toggleMag.groundEffect.F = groundEffectDeltaF.length();
+                toggleMag.groundEffect.M = groundEffectDeltaM.length();
+                toggleMag.download.F = downloadDeltaF.length();
+                toggleMag.download.M = downloadDeltaM.length();
+                toggleMag.compressibility.F = compressibilityDeltaF.length();
+                toggleMag.compressibility.M = compressibilityDeltaM.length();
+
+                // Added mass (equivalent extra force required to reach same acceleration)
+                if (useAddedMass) {
+                    const m_eff_avg = (m_eff_x + m_eff_y + m_eff_z) / 3;
+                    const J_avg = (J.x + J.y + J.z) / 3;
+                    const J_eff_avg = (J_eff_x + J_eff_y + J_eff_z) / 3;
+                    toggleMag.addedMass.F = F_total.length() * (1 - dronePhys.mass / m_eff_avg);
+                    toggleMag.addedMass.M = tau_total_B.length() * (1 - J_avg / J_eff_avg);
+                } else {
+                    toggleMag.addedMass.F = 0;
+                    toggleMag.addedMass.M = 0;
+                }
+
+                // Unsteady lift — force being "held back" by Wagner lag
+                if (dronePhys.useUnsteadyLift) {
+                    const heldBack = 1 - forceLagState.wagnerPhi;
+                    toggleMag.unsteadyLift.F = surf.F_W.length() * heldBack;
+                    toggleMag.unsteadyLift.M = surf.M_W.length() * heldBack;
+                } else {
+                    toggleMag.unsteadyLift.F = 0;
+                    toggleMag.unsteadyLift.M = 0;
+                }
+
+                // Buoyancy
+                if (dronePhys.useBuoyancy) {
+                    toggleMag.buoyancy.F = Math.abs(
+                        dronePhys.rho * dronePhys.bodyVolume * dronePhys.gravity
+                        * (dronePhys.buoyancyDeltaT / dronePhys.ambientTemp)
+                    );
+                } else {
+                    toggleMag.buoyancy.F = 0;
+                }
+                toggleMag.buoyancy.M = 0;
+
+                // Coriolis
+                if (dronePhys.useCoriolis) {
+                    const omegaEarth = 7.2921159e-5;
+                    const latRad = dronePhys.earthLatitude * Math.PI / 180;
+                    const ov = new THREE.Vector3(0, omegaEarth * Math.sin(latRad), omegaEarth * Math.cos(latRad));
+                    toggleMag.coriolis.F = new THREE.Vector3()
+                        .crossVectors(ov, droneDyn.vel).multiplyScalar(-2 * dronePhys.mass).length();
+                } else {
+                    toggleMag.coriolis.F = 0;
+                }
+                toggleMag.coriolis.M = 0;
+
+                // Net force / torque actually applied
+                // Net force / torque actually applied
+                toggleMag.total.F = F_total.length();
+                toggleMag.total.M = tau_total_B.length();
+
+                // Drag comparison — always computed, regardless of which model drives dynamics
+                toggleMag.dragComparison.lumped = F_D_W.length();
+                toggleMag.dragComparison.surface = surf.F_W.length();
+
+                updateToggleTable();
+
+                if (simTime - lastToggleChartPush >= 0.1) {
+                    lastToggleChartPush = simTime;
+                    pushToggleHistory();
+                    updateToggleCharts();
+                }
+            }
+
+
+            // --- 15. HUD updates — only on the last substep ---
+            if (isLastSubstep) {
+                const dEl = document.getElementById('hud-drag-mag');
+                if (dEl) dEl.textContent = surf.F_W.length().toFixed(2) + ' N';
+                const mEl = document.getElementById('hud-surface-mom');
+                if (mEl) mEl.textContent = `[${surf.M_W.x.toFixed(1)}, ${surf.M_W.y.toFixed(1)}, ${surf.M_W.z.toFixed(1)}]`;
+                const pEl = document.getElementById('hud-max-press');
+                if (pEl) pEl.textContent = surf.maxP.toFixed(2) + ' Pa';
+
+                const dbEl = document.getElementById('hud-drag-body');
+                if (dbEl) dbEl.textContent = F_D_W.length().toFixed(2) + ' N';
+                const dbvEl = document.getElementById('hud-drag-body-vec');
+                if (dbvEl) dbvEl.textContent = `[${F_D_B.x.toFixed(1)}, ${F_D_B.y.toFixed(1)}, ${F_D_B.z.toFixed(1)}]`;
+
+                const phiEl = document.getElementById('hud-wagner-phi');
+                if (phiEl) phiEl.textContent = forceLagState.wagnerPhi.toFixed(2);
+
+                if (isPlaying && forceChart) {
+                    updateForceChart(simTime, F_D_W.length(), surf.F_W.length(), surf.M_W.length());
+                }
             }
         }
 
@@ -2342,6 +3328,7 @@
             initParticleSystem();
             initNearParticles();
             initSlicePlane();
+            initSurfaceForceArrows();
             initCoordinateFrames();
             initProbeInteraction();
             initWaypointClick();
@@ -2452,7 +3439,11 @@
             const colors = new Float32Array(count * 3);
             for (let i = 0; i < count; i++) { colors[i * 3] = 0.15; colors[i * 3 + 1] = 0.35; colors[i * 3 + 2] = 0.60; }
             mergedGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            droneMesh = new THREE.Mesh(mergedGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.75, vertexColors: true, side: THREE.DoubleSide }));
+            droneMesh = new THREE.Mesh(mergedGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, 
+                roughness: 0.75, 
+                metalness: 0.1, 
+                vertexColors: true, 
+                side: THREE.DoubleSide }));
             droneMesh.userData.rotorOffsets = rotorLocalOffsets;
             droneModel.add(droneMesh);
             rotorLocalOffsets.forEach(off => {
@@ -2469,6 +3460,7 @@
             droneModelMeta.triangles = Math.round(count / 3);
             updateDroneInfo();
             autoConfigureRotors();
+            computeAddedMassFromBounds();
         }
         // 'auto' | 'yup' | 'zup' — user can override via UI
         let stlFrameMode = 'auto';
@@ -2759,7 +3751,7 @@
             const colors = new Float32Array(count * 3);
             for (let i = 0; i < count; i++) { colors[i * 3] = 0.15; colors[i * 3 + 1] = 0.35; colors[i * 3 + 2] = 0.60; }
             geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            droneMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.65, vertexColors: true, side: THREE.DoubleSide }));
+            droneMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.1, vertexColors: true, side: THREE.DoubleSide }));
             droneMesh.userData.rotorOffsets = rotorLocalOffsets;
             droneModel.add(droneMesh);
             buildDownwashCones();
@@ -2770,6 +3762,7 @@
             const dr = document.getElementById('disp-dist-radius'); if (dr) dr.textContent = flowDisturbance.radius.toFixed(2);
             droneModelMeta.name = meta.name; droneModelMeta.triangles = meta.triangles;
             updateDroneInfo();
+            computeAddedMassFromBounds();
         }
 
         function loadDroneFromSTLBuffer(name, buffer) {
@@ -3007,6 +4000,29 @@
             scene.add(sliceMesh);
         }
 
+        function initSurfaceForceArrows() {
+            if (surfaceForceArrowMesh) {
+                scene.remove(surfaceForceArrowMesh);
+                surfaceForceArrowMesh.geometry.dispose();
+                surfaceForceArrowMesh.material.dispose();
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(0), 3));
+            const mat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: 0.95,
+                depthTest: true, depthWrite: false,
+            });
+            surfaceForceArrowMesh = new THREE.LineSegments(geo, mat);
+            surfaceForceArrowMesh.frustumCulled = false;
+            surfaceForceArrowMesh.renderOrder = 3;
+            surfaceForceArrowMesh.visible = false;
+            scene.add(surfaceForceArrowMesh);
+            surfaceForceArrowPositions = null;
+            surfaceForceArrowColors = null;
+            surfaceForceArrowCapacity = 0;
+        }
+
         function rebuildSliceDecorations(geo) {
             while (sliceMesh.children.length) {
                 const c = sliceMesh.children.pop();
@@ -3038,6 +4054,93 @@
                 new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -0.15, 0), new THREE.Vector3(0, 0.15, 0)]),
                 new THREE.LineBasicMaterial({ color: 0xef4444 })
             ));
+        }
+
+        function updateSurfaceForceArrows() {
+            if (!surfaceForceArrowMesh) return;
+            const samples = lastSurfaceSamples;
+            if (!surfaceForceViz.enabled || !samples || samples.length === 0) {
+                surfaceForceArrowMesh.visible = false;
+                const countEl = document.getElementById('disp-surface-arrow-count');
+                if (countEl) countEl.textContent = '0 arrows';
+                return;
+            }
+            surfaceForceArrowMesh.visible = true;
+
+            // Sample stride
+            const stride = Math.max(1, surfaceForceViz.stride | 0);
+            const n = Math.ceil(samples.length / stride);
+
+            // Pick which vector to draw + default color per mode
+            let modeKey, baseColor;
+            if (surfaceForceViz.arrowMode === 'pressure') {
+                modeKey = ['fpx', 'fpy', 'fpz'];
+                baseColor = [1.0, 0.35, 0.35];       // red
+            } else if (surfaceForceViz.arrowMode === 'shear') {
+                modeKey = ['fsx', 'fsy', 'fsz'];
+                baseColor = [0.40, 0.75, 1.0];       // blue
+            } else {
+                modeKey = ['fx', 'fy', 'fz'];
+                baseColor = [1.0, 0.85, 0.30];       // yellow
+            }
+
+            // Find max magnitude for auto-scale
+            let maxF = 1e-9;
+            for (let i = 0; i < samples.length; i += stride) {
+                const s = samples[i];
+                const f = Math.hypot(s[modeKey[0]], s[modeKey[1]], s[modeKey[2]]);
+                if (f > maxF) maxF = f;
+            }
+            const scale = surfaceForceViz.maxArrowLen / maxF;
+
+            // (Re)allocate line-segment buffers if needed
+            const neededVerts = n * 2;                 // 2 vertices per arrow
+            const neededFloats = neededVerts * 3;
+            if (!surfaceForceArrowPositions || neededFloats > surfaceForceArrowCapacity) {
+                const cap = Math.max(neededFloats, surfaceForceArrowCapacity * 2, 6000);
+                surfaceForceArrowPositions = new Float32Array(cap);
+                surfaceForceArrowColors = new Float32Array(cap);
+                surfaceForceArrowCapacity = cap;
+                surfaceForceArrowMesh.geometry.dispose();
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(surfaceForceArrowPositions, 3));
+                geo.setAttribute('color', new THREE.BufferAttribute(surfaceForceArrowColors, 3));
+                surfaceForceArrowMesh.geometry = geo;
+            }
+
+            const pos = surfaceForceArrowPositions;
+            const col = surfaceForceArrowColors;
+            let writeIdx = 0;
+            for (let i = 0, si = 0; i < samples.length && si < n; i += stride, si++) {
+                const s = samples[i];
+                const fx = s[modeKey[0]], fy = s[modeKey[1]], fz = s[modeKey[2]];
+                const fm = Math.hypot(fx, fy, fz);
+                if (fm < 1e-9) continue;
+
+                const len = fm * scale;
+                const j = writeIdx * 6;
+
+                // Shaft
+                pos[j + 0] = s.cx;
+                pos[j + 1] = s.cy;
+                pos[j + 2] = s.cz;
+                pos[j + 3] = s.cx + (fx / fm) * len;
+                pos[j + 4] = s.cy + (fy / fm) * len;
+                pos[j + 5] = s.cz + (fz / fm) * len;
+
+                col[j + 0] = baseColor[0]; col[j + 1] = baseColor[1]; col[j + 2] = baseColor[2];
+                col[j + 3] = baseColor[0]; col[j + 4] = baseColor[1]; col[j + 5] = baseColor[2];
+
+                writeIdx++;
+            }
+
+            surfaceForceArrowMesh.geometry.setDrawRange(0, writeIdx * 2);
+            surfaceForceArrowMesh.geometry.attributes.position.needsUpdate = true;
+            surfaceForceArrowMesh.geometry.attributes.color.needsUpdate = true;
+            surfaceForceArrowMesh.geometry.computeBoundingSphere();
+
+            const countEl = document.getElementById('disp-surface-arrow-count');
+            if (countEl) countEl.textContent = writeIdx + ' arrows';
         }
 
         function updateSlicePlane() {
@@ -3260,150 +4363,150 @@
         let trajPathLine = null;
         let trajVelArrows = [];
 
-       function updateWaypointMarkers() {
-    while (waypointMarkers.children.length) {
-        const o = waypointMarkers.children.pop();
-        if (o.geometry) o.geometry.dispose();
-        if (o.material) o.material.dispose();
-    }
-    trajVelArrows = [];
+        function updateWaypointMarkers() {
+            while (waypointMarkers.children.length) {
+                const o = waypointMarkers.children.pop();
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) o.material.dispose();
+            }
+            trajVelArrows = [];
 
-    const wps = trajConfig.waypoints;
-    if (!wps.length) return;
+            const wps = trajConfig.waypoints;
+            if (!wps.length) return;
 
-    const v = validateWaypointTrajectory();
-    const Vmax = v.limit.V_max;
+            const v = validateWaypointTrajectory();
+            const Vmax = v.limit.V_max;
 
-    // Sampled path line (unchanged)
-    if (wps.length >= 2) {
-        let totalT = 0;
-        for (let i = 1; i < wps.length; i++) totalT += Math.max(0.2, wps[i].time || 2);
-        const samples = [];
-        const SAMPLES_PER_SEC = 20;
-        const N = Math.max(50, Math.min(2000, Math.ceil(totalT * SAMPLES_PER_SEC)));
-        for (let i = 0; i <= N; i++) {
-            const s = (i / N) * totalT;
-            const ref = getWaypointReference(trajConfig.anchorTime + s);
-            samples.push(ref.pos.clone());
+            // Sampled path line (unchanged)
+            if (wps.length >= 2) {
+                let totalT = 0;
+                for (let i = 1; i < wps.length; i++) totalT += Math.max(0.2, wps[i].time || 2);
+                const samples = [];
+                const SAMPLES_PER_SEC = 20;
+                const N = Math.max(50, Math.min(2000, Math.ceil(totalT * SAMPLES_PER_SEC)));
+                for (let i = 0; i <= N; i++) {
+                    const s = (i / N) * totalT;
+                    const ref = getWaypointReference(trajConfig.anchorTime + s);
+                    samples.push(ref.pos.clone());
+                }
+                waypointMarkers.add(new THREE.Line(
+                    new THREE.BufferGeometry().setFromPoints(samples),
+                    new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.85 })
+                ));
+            }
+
+            wps.forEach((wp, i) => {
+                const p = new THREE.Vector3(wp.pos[0], wp.pos[1], wp.pos[2]);
+                const over = v.wpWarnings.has(i);
+
+                const sphereGeo = new THREE.SphereGeometry(over ? 0.11 : 0.09, 16, 16);
+                const sphereMat = new THREE.MeshBasicMaterial({
+                    color: over ? 0xef4444 : (i === 0 ? 0x10b981 : 0xfbbf24)
+                });
+                const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+                sphere.position.copy(p);
+                waypointMarkers.add(sphere);
+
+                const vv = new THREE.Vector3(...(wp.vel || [0, 0, 0]));
+                const spd = vv.length();
+                if (spd > 0.02) {
+                    const arrow = new THREE.ArrowHelper(
+                        vv.clone().normalize(), p,
+                        Math.min(1.2, spd * 0.25 + 0.15),
+                        spd > Vmax ? 0xef4444 : 0x22d3ee,
+                        0.1, 0.08
+                    );
+                    waypointMarkers.add(arrow);
+                    trajVelArrows.push(arrow);
+                }
+            });
         }
-        waypointMarkers.add(new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints(samples),
-            new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.85 })
-        ));
-    }
-
-    wps.forEach((wp, i) => {
-        const p = new THREE.Vector3(wp.pos[0], wp.pos[1], wp.pos[2]);
-        const over = v.wpWarnings.has(i);
-
-        const sphereGeo = new THREE.SphereGeometry(over ? 0.11 : 0.09, 16, 16);
-        const sphereMat = new THREE.MeshBasicMaterial({
-            color: over ? 0xef4444 : (i === 0 ? 0x10b981 : 0xfbbf24)
-        });
-        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-        sphere.position.copy(p);
-        waypointMarkers.add(sphere);
-
-        const vv = new THREE.Vector3(...(wp.vel || [0, 0, 0]));
-        const spd = vv.length();
-        if (spd > 0.02) {
-            const arrow = new THREE.ArrowHelper(
-                vv.clone().normalize(), p,
-                Math.min(1.2, spd * 0.25 + 0.15),
-                spd > Vmax ? 0xef4444 : 0x22d3ee,
-                0.1, 0.08
-            );
-            waypointMarkers.add(arrow);
-            trajVelArrows.push(arrow);
-        }
-    });
-}
 
         function updateVelocityEnvelopeBanner(v) {
-    const banner  = document.getElementById('velocity-envelope-banner');
-    const vmaxEl  = document.getElementById('vel-env-vmax');
-    const amaxEl  = document.getElementById('vel-env-amax');
-    const statusEl= document.getElementById('vel-env-status');
-    const clampBtn= document.getElementById('btn-clamp-velocities');
-    if (!banner) return;
+            const banner = document.getElementById('velocity-envelope-banner');
+            const vmaxEl = document.getElementById('vel-env-vmax');
+            const amaxEl = document.getElementById('vel-env-amax');
+            const statusEl = document.getElementById('vel-env-status');
+            const clampBtn = document.getElementById('btn-clamp-velocities');
+            if (!banner) return;
 
-    vmaxEl.textContent = v.limit.V_max.toFixed(1);
-    amaxEl.textContent = v.limit.a_max.toFixed(1);
+            vmaxEl.textContent = v.limit.V_max.toFixed(1);
+            amaxEl.textContent = v.limit.a_max.toFixed(1);
 
-    const hasIssue = v.wpWarnings.size > 0 || v.segWarnings.size > 0;
-    if (hasIssue) {
-        banner.className = 'rounded-lg border border-rose-700/60 bg-rose-950/30 px-2 py-1.5 text-[10px] flex items-start gap-1.5 mt-2 text-rose-200';
-        const wpList = [...v.wpWarnings].map(i => 'WP' + (i+1)).join(', ');
-        const segList = [...v.segWarnings.keys()].map(i => `seg ${i}→${i+1}`).join(', ');
-        statusEl.textContent = `Exceeds: ${[wpList, segList].filter(Boolean).join(' · ')}`;
-        statusEl.className = 'text-rose-300 mt-0.5';
-        clampBtn.style.display = '';
-    } else {
-        banner.className = 'rounded-lg border border-emerald-700/40 bg-emerald-950/20 px-2 py-1.5 text-[10px] flex items-start gap-1.5 mt-2 text-emerald-200';
-        statusEl.textContent = 'All waypoints & segments within physical limits';
-        statusEl.className = 'text-emerald-300 mt-0.5';
-        clampBtn.style.display = 'none';
-    }
-}
-
-function clampWaypointVelocities() {
-    const v = validateWaypointTrajectory();
-    const Vmax = v.limit.V_max;
-    let clipped = 0;
-
-    // Scale endpoint velocities
-    trajConfig.waypoints.forEach(wp => {
-        const s = Math.hypot(...(wp.vel || [0,0,0]));
-        if (s > Vmax) {
-            const k = Vmax / s;
-            wp.vel = [wp.vel[0]*k, wp.vel[1]*k, wp.vel[2]*k];
-            clipped++;
-        }
-    });
-
-    // Then, if segments still exceed, stretch their time so peak ≤ Vmax.
-    // Simple heuristic: scale T by peak / Vmax (peak velocity ∝ 1/T for splines).
-    v.segPeaks.forEach(sp => {
-        if (sp.peakV > Vmax) {
-            const k = sp.peakV / Vmax;
-            const nextIdx = sp.segIdx + 1;
-            const wp = trajConfig.waypoints[nextIdx];
-            if (wp) {
-                wp.time = Math.max(0.2, wp.time * k);
-                clipped++;
+            const hasIssue = v.wpWarnings.size > 0 || v.segWarnings.size > 0;
+            if (hasIssue) {
+                banner.className = 'rounded-lg border border-rose-700/60 bg-rose-950/30 px-2 py-1.5 text-[10px] flex items-start gap-1.5 mt-2 text-rose-200';
+                const wpList = [...v.wpWarnings].map(i => 'WP' + (i + 1)).join(', ');
+                const segList = [...v.segWarnings.keys()].map(i => `seg ${i}→${i + 1}`).join(', ');
+                statusEl.textContent = `Exceeds: ${[wpList, segList].filter(Boolean).join(' · ')}`;
+                statusEl.className = 'text-rose-300 mt-0.5';
+                clampBtn.style.display = '';
+            } else {
+                banner.className = 'rounded-lg border border-emerald-700/40 bg-emerald-950/20 px-2 py-1.5 text-[10px] flex items-start gap-1.5 mt-2 text-emerald-200';
+                statusEl.textContent = 'All waypoints & segments within physical limits';
+                statusEl.className = 'text-emerald-300 mt-0.5';
+                clampBtn.style.display = 'none';
             }
         }
-    });
 
-    renderWaypointList();
-    updateWaypointMarkers();
-    showToast(clipped > 0 ? `Clamped ${clipped} waypoint(s) to ${Vmax.toFixed(1)} m/s envelope` : 'Nothing to clamp');
-}
+        function clampWaypointVelocities() {
+            const v = validateWaypointTrajectory();
+            const Vmax = v.limit.V_max;
+            let clipped = 0;
+
+            // Scale endpoint velocities
+            trajConfig.waypoints.forEach(wp => {
+                const s = Math.hypot(...(wp.vel || [0, 0, 0]));
+                if (s > Vmax) {
+                    const k = Vmax / s;
+                    wp.vel = [wp.vel[0] * k, wp.vel[1] * k, wp.vel[2] * k];
+                    clipped++;
+                }
+            });
+
+            // Then, if segments still exceed, stretch their time so peak ≤ Vmax.
+            // Simple heuristic: scale T by peak / Vmax (peak velocity ∝ 1/T for splines).
+            v.segPeaks.forEach(sp => {
+                if (sp.peakV > Vmax) {
+                    const k = sp.peakV / Vmax;
+                    const nextIdx = sp.segIdx + 1;
+                    const wp = trajConfig.waypoints[nextIdx];
+                    if (wp) {
+                        wp.time = Math.max(0.2, wp.time * k);
+                        clipped++;
+                    }
+                }
+            });
+
+            renderWaypointList();
+            updateWaypointMarkers();
+            showToast(clipped > 0 ? `Clamped ${clipped} waypoint(s) to ${Vmax.toFixed(1)} m/s envelope` : 'Nothing to clamp');
+        }
 
 
-            function renderWaypointList() {
-    const c = document.getElementById('waypoint-list');
-    if (!c) return;
+        function renderWaypointList() {
+            const c = document.getElementById('waypoint-list');
+            if (!c) return;
 
-    // Validate first — we need the warning set
-    const v = validateWaypointTrajectory();
-    updateVelocityEnvelopeBanner(v);
+            // Validate first — we need the warning set
+            const v = validateWaypointTrajectory();
+            updateVelocityEnvelopeBanner(v);
 
-    c.innerHTML = '';
+            c.innerHTML = '';
 
-    trajConfig.waypoints.forEach((wp, i) => {
-        const spd = Math.hypot(...(wp.vel || [0,0,0]));
-        const isLast   = i === trajConfig.waypoints.length - 1;
-        const overVel  = v.wpWarnings.has(i);
-        const segPeak  = v.segPeaks.find(sp => sp.segIdx === i);
-        const segOver  = v.segWarnings.has(i);
+            trajConfig.waypoints.forEach((wp, i) => {
+                const spd = Math.hypot(...(wp.vel || [0, 0, 0]));
+                const isLast = i === trajConfig.waypoints.length - 1;
+                const overVel = v.wpWarnings.has(i);
+                const segPeak = v.segPeaks.find(sp => sp.segIdx === i);
+                const segOver = v.segWarnings.has(i);
 
-        const velColor = overVel ? 'text-rose-400' : 'text-slate-500';
-        const borderCls = overVel ? 'border-rose-700/60' : (segOver ? 'border-amber-700/50' : 'border-slate-700');
+                const velColor = overVel ? 'text-rose-400' : 'text-slate-500';
+                const borderCls = overVel ? 'border-rose-700/60' : (segOver ? 'border-amber-700/50' : 'border-slate-700');
 
-        const row = document.createElement('div');
-        row.className = `bg-slate-950 border ${borderCls} rounded p-2 space-y-1`;
-        row.innerHTML = `
+                const row = document.createElement('div');
+                row.className = `bg-slate-950 border ${borderCls} rounded p-2 space-y-1`;
+                row.innerHTML = `
       <div class="flex justify-between items-center">
         <span class="text-[10px] ${i === 0 ? 'text-emerald-400' : 'text-amber-400'} font-semibold">
           WP ${i + 1}${isLast ? ' (end)' : ''}
@@ -3428,9 +4531,9 @@ function clampWaypointVelocities() {
 
       <div class="text-[9px] text-slate-500">Acceleration (ax, ay, az) — used by quintic</div>
       <div class="grid grid-cols-3 gap-1">
-        <input type="number" step="0.1" value="${(wp.acc || [0,0,0])[0]}" data-idx="${i}" data-field="ax" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px]">
-        <input type="number" step="0.1" value="${(wp.acc || [0,0,0])[1]}" data-idx="${i}" data-field="ay" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px]">
-        <input type="number" step="0.1" value="${(wp.acc || [0,0,0])[2]}" data-idx="${i}" data-field="az" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px]">
+        <input type="number" step="0.1" value="${(wp.acc || [0, 0, 0])[0]}" data-idx="${i}" data-field="ax" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px]">
+        <input type="number" step="0.1" value="${(wp.acc || [0, 0, 0])[1]}" data-idx="${i}" data-field="ay" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px]">
+        <input type="number" step="0.1" value="${(wp.acc || [0, 0, 0])[2]}" data-idx="${i}" data-field="az" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px]">
       </div>
 
       <div class="grid grid-cols-2 gap-1">
@@ -3457,47 +4560,47 @@ function clampWaypointVelocities() {
         ` : ''}
       ` : ''}
     `;
-        c.appendChild(row);
-    });
+                c.appendChild(row);
+            });
 
-    // Delete
-    c.querySelectorAll('[data-act="del"]').forEach(btn => btn.addEventListener('click', () => {
-        trajConfig.waypoints.splice(parseInt(btn.dataset.idx), 1);
-        renderWaypointList();
-        updateWaypointMarkers();
-    }));
+            // Delete
+            c.querySelectorAll('[data-act="del"]').forEach(btn => btn.addEventListener('click', () => {
+                trajConfig.waypoints.splice(parseInt(btn.dataset.idx), 1);
+                renderWaypointList();
+                updateWaypointMarkers();
+            }));
 
-    // Field changes
-    c.querySelectorAll('input[data-field], select[data-field]').forEach(inp => inp.addEventListener('change', () => {
-        const idx = parseInt(inp.dataset.idx);
-        const fld = inp.dataset.field;
-        const wp = trajConfig.waypoints[idx];
-        if (!wp) return;
-        if (fld === 'segment') {
-            wp.segment = inp.value;
-        } else {
-            const val = parseFloat(inp.value) || 0;
-            if (fld === 'px') wp.pos[0] = val;
-            else if (fld === 'py') wp.pos[1] = val;
-            else if (fld === 'pz') wp.pos[2] = val;
-            else if (fld === 'vx') wp.vel[0] = val;
-            else if (fld === 'vy') wp.vel[1] = val;
-            else if (fld === 'vz') wp.vel[2] = val;
-            else if (fld === 'ax') { wp.acc = wp.acc || [0,0,0]; wp.acc[0] = val; }
-            else if (fld === 'ay') { wp.acc = wp.acc || [0,0,0]; wp.acc[1] = val; }
-            else if (fld === 'az') { wp.acc = wp.acc || [0,0,0]; wp.acc[2] = val; }
-            else if (fld === 'yaw') wp.yaw = val;
-            else if (fld === 'time') wp.time = Math.max(0.2, val);
+            // Field changes
+            c.querySelectorAll('input[data-field], select[data-field]').forEach(inp => inp.addEventListener('change', () => {
+                const idx = parseInt(inp.dataset.idx);
+                const fld = inp.dataset.field;
+                const wp = trajConfig.waypoints[idx];
+                if (!wp) return;
+                if (fld === 'segment') {
+                    wp.segment = inp.value;
+                } else {
+                    const val = parseFloat(inp.value) || 0;
+                    if (fld === 'px') wp.pos[0] = val;
+                    else if (fld === 'py') wp.pos[1] = val;
+                    else if (fld === 'pz') wp.pos[2] = val;
+                    else if (fld === 'vx') wp.vel[0] = val;
+                    else if (fld === 'vy') wp.vel[1] = val;
+                    else if (fld === 'vz') wp.vel[2] = val;
+                    else if (fld === 'ax') { wp.acc = wp.acc || [0, 0, 0]; wp.acc[0] = val; }
+                    else if (fld === 'ay') { wp.acc = wp.acc || [0, 0, 0]; wp.acc[1] = val; }
+                    else if (fld === 'az') { wp.acc = wp.acc || [0, 0, 0]; wp.acc[2] = val; }
+                    else if (fld === 'yaw') wp.yaw = val;
+                    else if (fld === 'time') wp.time = Math.max(0.2, val);
+                }
+                renderWaypointList();
+                updateWaypointMarkers();
+            }));
         }
-        renderWaypointList();
-        updateWaypointMarkers();
-    }));
-}
         // ============================================================
         // CHART
         // ============================================================
         let forceChart = null;
-        const chartTimes = [], chartForceData = [], chartMomentData = [];
+        const chartTimes = [], chartForceData = [], chartSurfaceData = [], chartMomentData = [];
         let lastChartPush = -1;
 
         function initChart() {
@@ -3506,8 +4609,9 @@ function clampWaypointVelocities() {
                 type: 'line',
                 data: {
                     labels: chartTimes, datasets: [
-                        { label: 'Body Drag |F| (N)', data: chartForceData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
-                        { label: 'Surface Moment |M| (N·m)', data: chartMomentData, borderColor: '#ef4444', backgroundColor: 'transparent', borderWidth: 1.5, tension: 0.3, pointRadius: 0 }
+                        { label: 'Lumped |F_B| (N)', data: chartForceData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.10)', fill: true, tension: 0.3, pointRadius: 0 },
+                        { label: 'Surface |F_W| (N)', data: chartSurfaceData, borderColor: '#f43f5e', backgroundColor: 'rgba(244,63,94,0.06)', fill: true, tension: 0.3, pointRadius: 0 },
+                        { label: 'Surface |M_W| (N·m)', data: chartMomentData, borderColor: '#6366f1', backgroundColor: 'transparent', borderWidth: 1.5, tension: 0.3, pointRadius: 0 }
                     ]
                 },
                 options: {
@@ -3520,20 +4624,182 @@ function clampWaypointVelocities() {
                 }
             });
         }
-        function updateForceChart(time, force, moment) {
+        function updateForceChart(time, lumped, surface, moment) {
             if (time - lastChartPush < 0.1) return;
             lastChartPush = time;
-            if (chartTimes.length > 70) { chartTimes.shift(); chartForceData.shift(); chartMomentData.shift(); }
+            if (chartTimes.length > 70) {
+                chartTimes.shift();
+                chartForceData.shift();
+                chartSurfaceData.shift();
+                chartMomentData.shift();
+            }
             chartTimes.push(time.toFixed(1) + 's');
-            chartForceData.push(force);
+            chartForceData.push(lumped);
+            chartSurfaceData.push(surface);
             chartMomentData.push(moment);
             forceChart.update('none');
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Per-toggle charts (force + torque)
+        // ═══════════════════════════════════════════════════════════════════
+        function initToggleCharts() {
+            const forceDatasets = TOGGLE_KEYS.map(k => ({
+                label: TOGGLE_LABELS[k],
+                data: toggleHistory[k + '_F'],
+                borderColor: TOGGLE_COLORS[k],
+                backgroundColor: 'transparent',
+                borderWidth: 1.5,
+                tension: 0.3,
+                pointRadius: 0,
+            }));
+            const torqueDatasets = TOGGLE_KEYS.map(k => ({
+                label: TOGGLE_LABELS[k],
+                data: toggleHistory[k + '_M'],
+                borderColor: TOGGLE_COLORS[k],
+                backgroundColor: 'transparent',
+                borderWidth: 1.5,
+                tension: 0.3,
+                pointRadius: 0,
+            }));
+
+            const chartOpts = {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#64748b', maxTicksLimit: 6 }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#64748b' }, beginAtZero: true,
+                        title: { display: false }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#94a3b8', font: { size: 9 }, boxWidth: 10 },
+                        position: 'bottom'
+                    }
+                }
+            };
+
+            const ctxF = document.getElementById('toggleForceChart');
+            if (ctxF) {
+                toggleForceChart = new Chart(ctxF.getContext('2d'), {
+                    type: 'line',
+                    data: { labels: toggleHistory.times, datasets: forceDatasets },
+                    options: chartOpts
+                });
+            }
+            const ctxM = document.getElementById('toggleTorqueChart');
+            if (ctxM) {
+                toggleTorqueChart = new Chart(ctxM.getContext('2d'), {
+                    type: 'line',
+                    data: { labels: toggleHistory.times, datasets: torqueDatasets },
+                    options: chartOpts
+                });
+            }
+        }
+
+        function pushToggleHistory() {
+            if (toggleHistory.times.length > 100) {
+                toggleHistory.times.shift();
+                TOGGLE_KEYS.forEach(k => {
+                    toggleHistory[k + '_F'].shift();
+                    toggleHistory[k + '_M'].shift();
+                });
+            }
+            toggleHistory.times.push(simTime.toFixed(2) + 's');
+            TOGGLE_KEYS.forEach(k => {
+                toggleHistory[k + '_F'].push(toggleMag[k].F);
+                toggleHistory[k + '_M'].push(toggleMag[k].M);
+            });
+        }
+
+        function updateToggleCharts() {
+            if (toggleForceChart) {
+                toggleForceChart.data.labels = toggleHistory.times;
+                TOGGLE_KEYS.forEach((k, i) => {
+                    toggleForceChart.data.datasets[i].data = toggleHistory[k + '_F'];
+                });
+                toggleForceChart.update('none');
+            }
+            if (toggleTorqueChart) {
+                toggleTorqueChart.data.labels = toggleHistory.times;
+                TOGGLE_KEYS.forEach((k, i) => {
+                    toggleTorqueChart.data.datasets[i].data = toggleHistory[k + '_M'];
+                });
+                toggleTorqueChart.update('none');
+            }
+        }
+
+        function updateToggleTable() {
+            TOGGLE_KEYS.forEach(k => {
+                const forceEl = document.getElementById('tg-f-' + k);
+                const torqueEl = document.getElementById('tg-m-' + k);
+                const active = isToggleActive(k);
+
+                if (forceEl) {
+                    forceEl.textContent = active ? toggleMag[k].F.toFixed(3) : '—';
+                    forceEl.style.color = active ? TOGGLE_COLORS[k] : '#64748b';
+                }
+                if (torqueEl) {
+                    torqueEl.textContent = active ? toggleMag[k].M.toFixed(3) : '—';
+                    torqueEl.style.color = active ? TOGGLE_COLORS[k] : '#64748b';
+                }
+            });
+
+            const totalFEl = document.getElementById('tg-f-total');
+            // Lumped drag reference row — active when surface forces aren't driving
+            const lumpedActive = !ctrlConfig.useSurfaceForces;
+            const lumpedFEl = document.getElementById('tg-f-lumpedDrag');
+            const lumpedMEl = document.getElementById('tg-m-lumpedDrag');
+            if (lumpedFEl) {
+                lumpedFEl.textContent = lumpedActive ? toggleMag.dragComparison.lumped.toFixed(3) : '—';
+                lumpedFEl.style.color = lumpedActive ? '#f59e0b' : '#64748b';
+            }
+            if (lumpedMEl) {
+                lumpedMEl.textContent = lumpedActive ? '0.000' : '—';
+            }
+
+
+            const totalMEl = document.getElementById('tg-m-total');
+            if (totalFEl) totalFEl.textContent = toggleMag.total.F.toFixed(3);
+            if (totalMEl) totalMEl.textContent = toggleMag.total.M.toFixed(3);
         }
 
         // ============================================================
         // UI BINDING
         // ============================================================
         function syncAllInputsFromState() {
+
+            // Force toggles
+            const _syncToggle = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+            _syncToggle('cfg-force-surface-dyn', ctrlConfig.useSurfaceForces);
+            _syncToggle('cfg-force-paper-pressure', dronePhys.usePaperModel);
+            _syncToggle('cfg-force-rotor-wind', dronePhys.useRotorWindCoupling);
+            _syncToggle('cfg-force-rotor-interference', dronePhys.useRotorInterference);
+            _syncToggle('cfg-force-ground-effect', dronePhys.useGroundEffect);
+            _syncToggle('cfg-force-download', dronePhys.useDownload);
+            _syncToggle('cfg-force-added-mass', dronePhys.useAddedMass);
+            _syncToggle('cfg-force-unsteady-lift', dronePhys.useUnsteadyLift);
+            _syncToggle('cfg-force-buoyancy', dronePhys.useBuoyancy);
+            _syncToggle('cfg-force-coriolis', dronePhys.useCoriolis);
+            _syncToggle('cfg-force-compressibility', dronePhys.useCompressibility);
+
+            setVal('cfg-rotor-interference-k', dronePhys.rotorInterferenceFactor);
+            setVal('cfg-download-k', dronePhys.downloadFactor);
+            setVal('cfg-wagner-tau', dronePhys.wagnerTau);
+            setVal('cfg-buoyancy-dt', dronePhys.buoyancyDeltaT);
+            setVal('cfg-latitude', dronePhys.earthLatitude);
+
+            setVal('cfg-substeps', physicsSubsteps);
+            const _subDisp = document.getElementById('disp-substeps');
+            if (_subDisp) _subDisp.textContent = physicsSubsteps;
+
+
             setVal('cfg-steady-x', windConfig.steady_wind_xyz[0]);
             setVal('cfg-steady-y', windConfig.steady_wind_xyz[1]);
             setVal('cfg-steady-z', windConfig.steady_wind_xyz[2]);
@@ -3628,6 +4894,19 @@ function clampWaypointVelocities() {
             setVal('cfg-kd-rate-pitch', ctrlConfig.gains.rateKd[1]);
             setVal('cfg-kd-rate-yaw', ctrlConfig.gains.rateKd[2]);
             // Physics
+            const pme = document.getElementById('cfg-paper-model-enabled');
+            if (pme) pme.checked = dronePhys.usePaperModel;
+            const ame = document.getElementById('cfg-added-mass-enabled');
+            if (ame) ame.checked = dronePhys.useAddedMass;
+            const asl = document.getElementById('cfg-alpha-sep');
+            if (asl) {
+                const deg = dronePhys.alpha_sep * 180 / Math.PI;
+                asl.value = deg;
+                document.getElementById('disp-alpha-sep').textContent = deg.toFixed(0) + '°';
+            }
+            updateAddedMassHUD();
+
+
             setVal('cfg-mass', dronePhys.mass);
             setVal('cfg-gravity', dronePhys.gravity);
             setVal('cfg-inertia-x', dronePhys.inertia.x);
@@ -3661,10 +4940,30 @@ function clampWaypointVelocities() {
             const dbs = document.getElementById('disp-body-size');
             if (dbs) dbs.textContent = axisConfig.bodySize.toFixed(2);
 
+                        // ---- Flat-plate model ----
+            setVal('cfg-skinfriction-model', dronePhys.skinFrictionModel);
+            setVal('cfg-plate-length-mode', dronePhys.plateLengthMode);
+            setVal('cfg-plate-length', dronePhys.plateLength);
+            setVal('cfg-dyn-viscosity', dronePhys.dynamicViscosity);
+            setVal('cfg-re-crit', dronePhys.ReCrit);
+            document.getElementById('plate-length-fixed')
+                .classList.toggle('hidden', dronePhys.plateLengthMode !== 'fixed');
+
+
+
             updateControllerSections();
             updateTrajSections();
             updateThrustHints();
 
+            // Surface force viz sync
+            const _syncSurf = (id, val) => { const el = document.getElementById(id); if (el) { if (el.type === 'checkbox') el.checked = !!val; else el.value = val; } };
+            _syncSurf('cfg-surface-arrows-enabled', surfaceForceViz.enabled);
+            _syncSurf('cfg-surface-arrow-mode', surfaceForceViz.arrowMode);
+            _syncSurf('cfg-surface-arrow-stride', surfaceForceViz.stride);
+            _syncSurf('cfg-surface-arrow-len', surfaceForceViz.maxArrowLen);
+            _syncSurf('cfg-surface-direction-color', surfaceForceViz.directionColor);
+            const _d1 = document.getElementById('disp-surface-arrow-stride'); if (_d1) _d1.textContent = surfaceForceViz.stride;
+            const _d2 = document.getElementById('disp-surface-arrow-len'); if (_d2) _d2.textContent = surfaceForceViz.maxArrowLen.toFixed(2);
         }
 
         function updateControllerSections() {
@@ -3724,7 +5023,7 @@ function clampWaypointVelocities() {
             for (let i = 0; i < baseCount; i++) { baseColors[i * 3] = 0.15; baseColors[i * 3 + 1] = 0.35; baseColors[i * 3 + 2] = 0.60; }
             baseGeo.setAttribute('color', new THREE.BufferAttribute(baseColors, 3));
             droneMesh = new THREE.Mesh(baseGeo, new THREE.MeshStandardMaterial({
-                color: 0xffffff, roughness: 0.4, metalness: 0.65,
+                color: 0xffffff, roughness: 0.75, metalness: 0.1,
                 vertexColors: true, side: THREE.DoubleSide
             }));
             droneModel.add(droneMesh);
@@ -3756,7 +5055,7 @@ function clampWaypointVelocities() {
                 // if Y is smallest — already correct
 
                 const rotorMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-                    color: 0x94a3b8, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide
+                    color: 0x94a3b8, roughness: 0.75, metalness: 0.1, side: THREE.DoubleSide
                 }));
                 const group = new THREE.Group();
                 group.add(rotorMesh);
@@ -3801,6 +5100,8 @@ function clampWaypointVelocities() {
             if (dr) dr.textContent = flowR.toFixed(2);
 
             showToast(`Loaded · ${droneModelMeta.triangles.toLocaleString()} tri · arm ${armAvg.toFixed(2)} m · ${isZUp ? 'Z-up→Y-up applied' : 'frame OK'}`);
+
+            computeAddedMassFromBounds();
         }
 
         /**
@@ -3934,6 +5235,23 @@ function clampWaypointVelocities() {
                 });
             }
 
+            // ── Paper model bindings ──
+            document.getElementById('cfg-paper-model-enabled')?.addEventListener('change', e => {
+                dronePhys.usePaperModel = e.target.checked;
+                showToast('Paper pressure model: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-added-mass-enabled')?.addEventListener('change', e => {
+                dronePhys.useAddedMass = e.target.checked;
+                updateAddedMassHUD();
+                showToast('Added mass: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-alpha-sep')?.addEventListener('input', e => {
+                const deg = parseFloat(e.target.value);
+                dronePhys.alpha_sep = deg * Math.PI / 180;
+                document.getElementById('disp-alpha-sep').textContent = deg.toFixed(0) + '°';
+            });
+
+
             // ---- Coordinate frames ----
             document.getElementById('cfg-show-world-frame').addEventListener('change', e => {
                 axisConfig.showWorld = e.target.checked;
@@ -4050,6 +5368,7 @@ function clampWaypointVelocities() {
                 lastChartPush = -1;
                 chartTimes.length = 0;
                 chartForceData.length = 0;
+                chartSurfaceData.length = 0;
                 chartMomentData.length = 0;
                 if (forceChart) forceChart.update('none');
 
@@ -4250,6 +5569,24 @@ function clampWaypointVelocities() {
             bindNum('cfg-air-density', v => { dronePhys.rho = Math.max(0.001, v || 1.225); droneState.rho = dronePhys.rho; });
             bindNum('cfg-Cp-surface', v => { dronePhys.CpSurface = Math.max(0, v || 1.15); });
             bindNum('cfg-Cf-surface', v => { dronePhys.CfSurface = Math.max(0, v || 0.03); });
+
+                        // ---- Flat-plate skin friction (Approach 3) ----
+            document.getElementById('cfg-skinfriction-model')
+                .addEventListener('change', e => {
+                    dronePhys.skinFrictionModel = e.target.value;
+                    showToast('Skin friction: ' + e.target.value);
+                });
+            document.getElementById('cfg-plate-length-mode')
+                .addEventListener('change', e => {
+                    dronePhys.plateLengthMode = e.target.value;
+                    document.getElementById('plate-length-fixed')
+                        .classList.toggle('hidden', e.target.value !== 'fixed');
+                });
+            bindNum('cfg-plate-length',   v => { dronePhys.plateLength = Math.max(0.01, v || 0.30); });
+            bindNum('cfg-dyn-viscosity',  v => { dronePhys.dynamicViscosity = Math.max(1e-8, v || 1.81e-5); });
+            bindNum('cfg-re-crit',        v => { dronePhys.ReCrit = Math.max(1e3, v || 5.0e5); });
+
+
             document.getElementById('cfg-use-surface-dyn').addEventListener('change', e => {
                 ctrlConfig.useSurfaceForces = e.target.checked;
             });
@@ -4274,6 +5611,11 @@ function clampWaypointVelocities() {
                 dronePhys.rotorArmZ = DRONE_PHYS_DEFAULTS.rotorArmZ;
                 dronePhys.spinDir = [...DRONE_PHYS_DEFAULTS.spinDir];
                 droneState.rho = dronePhys.rho;
+                                dronePhys.skinFrictionModel = DRONE_PHYS_DEFAULTS.skinFrictionModel;
+                dronePhys.dynamicViscosity = DRONE_PHYS_DEFAULTS.dynamicViscosity;
+                dronePhys.ReCrit = DRONE_PHYS_DEFAULTS.ReCrit;
+                dronePhys.plateLengthMode = DRONE_PHYS_DEFAULTS.plateLengthMode;
+                dronePhys.plateLength = DRONE_PHYS_DEFAULTS.plateLength;
 
                 rebuildMixerFromGeometry();
                 updateSpinButtons();
@@ -4452,6 +5794,32 @@ function clampWaypointVelocities() {
             document.getElementById('cfg-near-count')?.addEventListener('input', e => { nearConfig.count = parseInt(e.target.value); document.getElementById('disp-near-count').textContent = nearConfig.count; initNearParticles(); });
             document.getElementById('cfg-near-box')?.addEventListener('input', e => { nearConfig.box = parseFloat(e.target.value); document.getElementById('disp-near-box').textContent = nearConfig.box.toFixed(2); });
 
+
+            // ── Surface force vectors ──
+            document.getElementById('cfg-surface-arrows-enabled')?.addEventListener('change', e => {
+                surfaceForceViz.enabled = e.target.checked;
+                if (!e.target.checked) {
+                    if (surfaceForceArrowMesh) surfaceForceArrowMesh.visible = false;
+                }
+                showToast('Surface arrows: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-surface-arrow-mode')?.addEventListener('change', e => {
+                surfaceForceViz.arrowMode = e.target.value;
+            });
+            document.getElementById('cfg-surface-arrow-stride')?.addEventListener('input', e => {
+                surfaceForceViz.stride = Math.max(1, parseInt(e.target.value) || 1);
+                document.getElementById('disp-surface-arrow-stride').textContent = surfaceForceViz.stride;
+            });
+            document.getElementById('cfg-surface-arrow-len')?.addEventListener('input', e => {
+                surfaceForceViz.maxArrowLen = parseFloat(e.target.value) || 0.15;
+                document.getElementById('disp-surface-arrow-len').textContent = surfaceForceViz.maxArrowLen.toFixed(2);
+            });
+            document.getElementById('cfg-surface-direction-color')?.addEventListener('change', e => {
+                surfaceForceViz.directionColor = e.target.checked;
+                showToast('Face direction-color: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+
+
             ['x', 'y', 'z'].forEach((axis, i) => { const el = document.getElementById(`cfg-steady-${axis}`); if (el) el.addEventListener('input', () => { windConfig.steady_wind_xyz[i] = parseFloat(el.value) || 0; }); });
 
             ['x', 'y', 'z'].forEach(axis => { const pEl = document.getElementById(`probe-${axis}-input`); if (pEl) pEl.addEventListener('input', e => { probePos[axis] = parseFloat(e.target.value) || 0; syncProbeUI(); }); });
@@ -4486,6 +5854,77 @@ function clampWaypointVelocities() {
                     document.getElementById('yaml-modal').classList.add('hidden');
                 } catch (e) { console.error(e); }
             });
+
+            // ═══════════════════════════════════════════════════════════════════
+            // Force toggle bindings
+            // ═══════════════════════════════════════════════════════════════════
+
+            // Pressure & shear
+            document.getElementById('cfg-force-surface-dyn')?.addEventListener('change', e => {
+                ctrlConfig.useSurfaceForces = e.target.checked;
+                showToast('Surface forces drive dynamics: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-paper-pressure')?.addEventListener('change', e => {
+                dronePhys.usePaperModel = e.target.checked;
+                showToast('Paper pressure model: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+
+            // Rotor aerodynamics
+            document.getElementById('cfg-force-rotor-wind')?.addEventListener('change', e => {
+                dronePhys.useRotorWindCoupling = e.target.checked;
+                showToast('Rotor-wind coupling: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-rotor-interference')?.addEventListener('change', e => {
+                dronePhys.useRotorInterference = e.target.checked;
+                showToast('Rotor interference: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-ground-effect')?.addEventListener('change', e => {
+                dronePhys.useGroundEffect = e.target.checked;
+                showToast('Ground effect: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-download')?.addEventListener('change', e => {
+                dronePhys.useDownload = e.target.checked;
+                showToast('Download: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+
+            // Transient & body
+            document.getElementById('cfg-force-added-mass')?.addEventListener('change', e => {
+                dronePhys.useAddedMass = e.target.checked;
+                updateAddedMassHUD();
+                showToast('Added mass: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-unsteady-lift')?.addEventListener('change', e => {
+                dronePhys.useUnsteadyLift = e.target.checked;
+                if (!e.target.checked) forceLagState.wagnerPhi = 1.0;
+                showToast('Unsteady lift (Wagner): ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-buoyancy')?.addEventListener('change', e => {
+                dronePhys.useBuoyancy = e.target.checked;
+                showToast('Buoyancy: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-coriolis')?.addEventListener('change', e => {
+                dronePhys.useCoriolis = e.target.checked;
+                showToast('Coriolis: ' + (e.target.checked ? 'ON' : 'OFF'));
+            });
+            document.getElementById('cfg-force-compressibility')?.addEventListener('change', e => {
+                dronePhys.useCompressibility = e.target.checked;
+                showToast('Compressibility: ' + (e.target.checked ? 'ON' : 'OFF') + ' (negligible at <10 m/s)');
+            });
+
+            // Tuning parameters
+            bindNum('cfg-rotor-interference-k', v => { dronePhys.rotorInterferenceFactor = Math.max(0, Math.min(0.5, v || 0.12)); });
+            bindNum('cfg-download-k', v => { dronePhys.downloadFactor = Math.max(0, Math.min(0.5, v || 0.10)); });
+            bindNum('cfg-wagner-tau', v => { dronePhys.wagnerTau = Math.max(0.005, v || 0.05); });
+            bindNum('cfg-buoyancy-dt', v => { dronePhys.buoyancyDeltaT = v || 0; });
+            bindNum('cfg-latitude', v => { dronePhys.earthLatitude = Math.max(-90, Math.min(90, v || 0)); });
+
+            // Integrator
+            document.getElementById('cfg-substeps')?.addEventListener('input', e => {
+                physicsSubsteps = Math.max(1, Math.min(20, parseInt(e.target.value) || 5));
+                document.getElementById('disp-substeps').textContent = physicsSubsteps;
+            });
+
+
 
             initFileDrop();
         }
@@ -4536,6 +5975,23 @@ function clampWaypointVelocities() {
                 cfgEl.textContent = cfg;
             }
 
+            // Drag model comparison ratio (lumped vs surface)
+            const dragRatioEl = document.getElementById('hud-drag-ratio');
+            if (dragRatioEl) {
+                const fb = toggleMag.dragComparison?.lumped || 0;
+                const fw = toggleMag.dragComparison?.surface || 0;
+                if (fb > 0.001 && fw > 0.001) {
+                    const r = fw / fb;
+                    dragRatioEl.textContent = r.toFixed(2) + '×';
+                    if (r > 2.5) dragRatioEl.className = 'text-rose-400 font-bold text-[11px]';
+                    else if (r > 1.5) dragRatioEl.className = 'text-amber-400 font-bold text-[11px]';
+                    else dragRatioEl.className = 'text-emerald-400 font-bold text-[11px]';
+                } else {
+                    dragRatioEl.textContent = '—';
+                    dragRatioEl.className = 'text-slate-400 text-[11px]';
+                }
+            }
+
             if (refMarker) {
                 if (ctrlConfig.type === 'lee_position') {
                     const ref = getTrajectoryReference(simTime);
@@ -4543,18 +5999,46 @@ function clampWaypointVelocities() {
                 } else refMarker.visible = false;
             }
             // Live reference speed vs envelope
-const refVMaxEl = document.getElementById('hud-ref-vmax');
-const refSpdEl  = document.getElementById('hud-ref-speed');
-if (refVMaxEl && refSpdEl && ctrlConfig.type === 'lee_position') {
-    const ref = getTrajectoryReference(simTime);
-    const spd = ref.vel.length();
-    const limits = computeSpeedAccelLimits(0.75);
-    refSpdEl.textContent = spd.toFixed(2) + ' m/s';
-    refSpdEl.className = spd > limits.V_max
-        ? 'text-rose-400 font-bold'
-        : 'text-cyan-300 font-bold';
-    refVMaxEl.textContent = limits.V_max.toFixed(1) + ' m/s';
-}
+            const refVMaxEl = document.getElementById('hud-ref-vmax');
+            const refSpdEl = document.getElementById('hud-ref-speed');
+            if (refVMaxEl && refSpdEl && ctrlConfig.type === 'lee_position') {
+                const ref = getTrajectoryReference(simTime);
+                const spd = ref.vel.length();
+                const limits = computeSpeedAccelLimits(0.75);
+                refSpdEl.textContent = spd.toFixed(2) + ' m/s';
+                refSpdEl.className = spd > limits.V_max
+                    ? 'text-rose-400 font-bold'
+                    : 'text-cyan-300 font-bold';
+                refVMaxEl.textContent = limits.V_max.toFixed(1) + ' m/s';
+            }
+
+                        // ---- Flat-plate diagnostics ----
+            const cfmEl = document.getElementById('hud-cf-model');
+            if (cfmEl) cfmEl.textContent = (lastSurfaceDiag.model === 'reynolds')
+                ? 'flat-plate Re' : 'constant';
+
+            const reEl = document.getElementById('hud-re-avg');
+            if (reEl) {
+                const re = lastSurfaceDiag.avgRe;
+                if (re > 0) {
+                    reEl.textContent = (re >= 1e6)
+                        ? (re / 1e6).toFixed(2) + ' M'
+                        : (re >= 1e3) ? (re / 1e3).toFixed(1) + ' k'
+                        : re.toFixed(0);
+                } else {
+                    reEl.textContent = '—';
+                }
+            }
+
+            const cfaEl = document.getElementById('hud-cf-avg');
+            if (cfaEl) cfaEl.textContent = (lastSurfaceDiag.avgCf > 0)
+                ? lastSurfaceDiag.avgCf.toExponential(2) : '—';
+
+            const adEl = document.getElementById('hud-aero-drag');
+            if (adEl) adEl.textContent = lastSurfaceDiag.drag_N.toFixed(2) + ' N';
+
+            const alEl = document.getElementById('hud-aero-lift');
+            if (alEl) alEl.textContent = lastSurfaceDiag.lift_N.toFixed(2) + ' N';
 
 
             // Live reference velocity arrow
@@ -4589,7 +6073,12 @@ if (refVMaxEl && refSpdEl && ctrlConfig.type === 'lee_position') {
                 if (isPlaying) {
                     simTime += dt;
                     document.getElementById('display-sim-time').textContent = simTime.toFixed(2) + ' s';
-                    stepDynamics(dt);
+                    // Substep for numerical accuracy (audit §6)
+                    const nSub = Math.max(1, Math.min(20, physicsSubsteps | 0));
+                    const subDt = dt / nSub;
+                    for (let s = 0; s < nSub; s++) {
+                        stepDynamics(subDt, s === nSub - 1);
+                    }
                 } else {
                     // keep surface heatmap updating even when paused
                     droneGroup.updateMatrixWorld(true);
@@ -4598,6 +6087,7 @@ if (refVMaxEl && refSpdEl && ctrlConfig.type === 'lee_position') {
                 updateArrowGrid();
                 if (isPlaying) { updateParticleSystem(dt); updateNearParticles(dt); }
                 updateSlicePlane();
+                updateSurfaceForceArrows();
                 // ---- Coordinate frames ----
                 if (worldFrameGroup) {
                     worldFrameGroup.visible = axisConfig.showWorld;
@@ -4627,6 +6117,7 @@ if (refVMaxEl && refSpdEl && ctrlConfig.type === 'lee_position') {
         window.onload = function () {
             initThree();
             initChart();
+            initToggleCharts();
             bindUI();
             syncAllInputsFromState();
             renderWaypointList();

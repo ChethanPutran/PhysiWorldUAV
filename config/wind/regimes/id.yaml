@@ -1,0 +1,16 @@
+# In-distribution wind (D1, D2): realised peak |w| ≤ 4 m/s, |w_z| ≤ 1 m/s,
+# slow temporal structure (f ≤ 0.3 Hz, rise ≥ 0.5 s, OU τ ≥ 2 s).
+# Beaufort: calm … light/gentle breeze (docs/datasets/wind.md).
+name: id
+category: id
+mean_speed: [0.0, 3.0]
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: steady, weight: 0.25}
+  - {type: cosine_gust, weight: 0.15, params: {peak_mps: [0.3, 1.0], rise_time_s: [0.5, 1.5], onset_fraction: [0.15, 0.7]}}
+  - {type: step, weight: 0.15, params: {delta_mps: [-1.0, 1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.7]}}
+  - {type: sinusoid, weight: 0.15, params: {amplitude_mps: [0.2, 0.8], frequency_hz: [0.05, 0.3]}}
+  - {type: ou, weight: 0.2, params: {sigma_mps: [0.1, 0.4], tau_s: [2.0, 5.0]}}
+  - {type: random_gusts, weight: 0.1, params: {rate_hz: [0.05, 0.15], peak_range_mps: [0.3, 0.8], rise_range_s: [0.5, 1.2]}}
+limits: {peak_speed_max: 4.0, vertical_max: 1.0, mean_horizontal: [0.0, 4.0]}

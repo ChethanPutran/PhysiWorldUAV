@@ -1,0 +1,5 @@
+data_type: closed_loop
+mode: combined
+family: figure_eight
+params: {amp_x_m: [1.5, 2.5], amp_y_m: [1.0, 1.5], frequency_hz: [0.05, 0.12], ramp_s: 3.0, azimuth_deg: [0.0, 360.0]}
+duration_s: [12.0, 15.0]

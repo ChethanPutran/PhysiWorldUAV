@@ -1,0 +1,4 @@
+# Same realisation rotated about world z (degrees).
+variable: wind_direction
+mode: closed_loop
+values: [0.0, 90.0, 180.0, 270.0]
