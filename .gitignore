@@ -28,3 +28,6 @@ credentials*.json
 /outputs/
 .pytest_cache/
 .hydra/
+
+# Launcher logs
+/logs/

@@ -1,0 +1,257 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dataset Report</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: a single scrolling report; KPI strip, then one panel per question (what / which scenarios / which wind / which vehicles / counterfactuals), then a filterable episode table. */
+:root{
+  --bg:#fcfcfb; --panel:#ffffff; --fg:#0b0b0b; --fg2:#52514e; --muted:#8a8984; --line:#e4e3de; --grid:#eceae5;
+  --c-id:#2a78d6; --c-mag:#eb6834; --c-dir:#1baf7a; --c-tmp:#eda100; --c-gst:#e87ba4; --c-phy:#008300; --c-trj:#6250d6; --c-val:#8a8984;
+  --band1:rgba(42,120,214,.10); --band2:rgba(42,120,214,.05);
+  --head:"Space Grotesk","Inter",system-ui,sans-serif; --body:"Inter",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#1a1a19; --panel:#222221; --fg:#f0efec; --fg2:#c3c2b7; --muted:#8f8e86; --line:#363633; --grid:#2d2d2b;
+  --c-id:#3987e5; --c-mag:#d95926; --c-dir:#199e70; --c-tmp:#c98500; --c-gst:#d55181; --c-phy:#0ca30c; --c-trj:#9085e9; --c-val:#8f8e86;
+  --band1:rgba(57,135,229,.16); --band2:rgba(57,135,229,.08); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1a1a19; --panel:#222221; --fg:#f0efec; --fg2:#c3c2b7; --muted:#8f8e86; --line:#363633; --grid:#2d2d2b;
+  --c-id:#3987e5; --c-mag:#d95926; --c-dir:#199e70; --c-tmp:#c98500; --c-gst:#d55181; --c-phy:#0ca30c; --c-trj:#9085e9; --c-val:#8f8e86;
+  --band1:rgba(57,135,229,.16); --band2:rgba(57,135,229,.08); color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.5 var(--body);padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font:600 28px/1.15 var(--head);margin:0;text-wrap:balance}
+h2{font:600 17px/1.3 var(--head);margin:0 0 2px}
+.sub{color:var(--fg2);margin:4px 0 0;max-width:70ch}
+.note{color:var(--fg2);font-size:12.5px;margin:0 0 12px;max-width:80ch}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.kpi b{display:block;font:600 26px/1.1 var(--head);font-variant-numeric:tabular-nums}
+.kpi span{color:var(--fg2);font-size:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:20px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--fg2);margin:0 0 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+svg text{fill:var(--fg2);font:11.5px var(--body)}
+svg text.v{fill:var(--fg);font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--fg2);font-weight:500;position:sticky;top:0;background:var(--panel)}
+.tablewrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+.filters{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px}
+select,input{font:13px var(--body);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
+select:focus-visible,input:focus-visible{outline:2px solid var(--c-id);outline-offset:1px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+#tip{position:fixed;z-index:20;pointer-events:none;background:var(--fg);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:6px;max-width:260px;opacity:0;transition:opacity .08s}
+.badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11.5px;background:var(--grid);color:var(--fg2)}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="ttl">Dataset report</h1>
+    <p class="sub" id="lede"></p>
+  </header>
+  <div class="kpis" id="kpis"></div>
+
+  <section class="panel" id="live" hidden>
+    <h2>Generation status <span class="badge" id="lv-state">waiting</span></h2>
+    <div id="lv-bar" style="height:10px;border-radius:5px;background:var(--grid);overflow:hidden;margin:10px 0 8px"><div id="lv-fill" style="height:100%;width:0;background:var(--c-id)"></div></div>
+    <div class="kpis" id="lv-kpis"></div>
+    <p class="note" id="lv-note" style="margin:10px 0 0"></p>
+    <div class="scroll" style="margin-top:8px"><table id="lv-recent"></table></div>
+  </section>
+
+  <section class="panel">
+    <h2>What each episode is for</h2>
+    <p class="note">Split role decides how an episode is used. Colour shows the kind of distribution shift it carries: in-distribution (ID), one of five OOD wind or physics shifts, or the physics-validation set.</p>
+    <div class="legend" id="leg-split"></div>
+    <div id="ch-split"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Scenarios</h2>
+      <p class="note">Scenario template per episode. Open-loop programs excite the rotors or body rates directly; closed-loop ones track a reference.</p>
+      <div class="legend"><span><i style="background:var(--c-id)"></i>closed loop</span><span><i style="background:var(--c-mag)"></i>open loop</span></div>
+      <div id="ch-scn"></div>
+    </section>
+    <section class="panel">
+      <h2>Parts of the plan</h2>
+      <p class="note">Each part is a block of groups with its own domain sampling, wind regime and counterfactual template.</p>
+      <div class="scroll"><table id="tb-parts"></table></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Wind</h2>
+    <p class="note">Mean horizontal wind speed per episode, by wind category. The dashed line is the ID limit of 4 m/s; OOD magnitude episodes sit above it. Dots are jittered vertically only to avoid overlap.</p>
+    <div id="ch-wind"></div>
+    <div class="grid2" style="margin-top:14px">
+      <div><div class="note" style="margin-bottom:4px">Wind profile</div><div id="ch-prof"></div></div>
+      <div><div class="note" style="margin-bottom:4px">Temporal class and gust class</div><div id="ch-cls"></div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Vehicle domains</h2>
+    <p class="note">Sampled physical factors, one dot per distinct domain, relative to nominal (1.0). The shaded bands mark ID (±10 %) and the OOD shell (10–20 %). Mass is shown as a factor of the nominal 0.716 kg mass, not the base-link mass.</p>
+    <div class="legend" id="leg-dom"></div>
+    <div id="ch-dom"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Counterfactual pairs</h2>
+    <p class="note">Groups share one seed and differ in one factor. Wind-scale siblings replay the same plan at 0, 0.5 and 1.0 times the wind. Domain siblings (physics validation) keep the wind and change the vehicle.</p>
+    <div id="ch-cf"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Episodes</h2>
+    <div class="filters">
+      <label>Part <select id="f-part"></select></label>
+      <label>Split <select id="f-split"></select></label>
+      <label>Scenario <select id="f-scn"></select></label>
+      <label>Search <input id="f-q" type="search" placeholder="episode or group id"></label>
+      <span class="badge" id="f-count"></span>
+    </div>
+    <div class="tablewrap"><table id="tb-eps"></table></div>
+  </section>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const ROWS = __DATA__;
+const META = __META__;
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const tip = $('#tip');
+function showTip(e,html){tip.innerHTML=html;tip.style.opacity=1;const w=tip.offsetWidth,x=Math.min(e.clientX+14,innerWidth-w-8);tip.style.left=x+'px';tip.style.top=(e.clientY+14)+'px'}
+function hideTip(){tip.style.opacity=0}
+document.addEventListener('mousemove',e=>{const t=e.target.closest('[data-tip]');t?showTip(e,t.dataset.tip):hideTip()});
+const count=(a,f)=>{const m=new Map();a.forEach(r=>{const k=f(r);m.set(k,(m.get(k)||0)+1)});return m};
+const sum=a=>a.reduce((s,x)=>s+x,0);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* categories of distribution shift */
+const CAT=[['id','In-distribution','--c-id'],['magnitude','OOD magnitude','--c-mag'],['direction','OOD direction','--c-dir'],['temporal','OOD temporal','--c-tmp'],['gust','OOD gust','--c-gst'],['physics','OOD physics','--c-phy'],['trajectory','OOD trajectory','--c-trj'],['val','Physics validation','--c-val']];
+const catOf=s=>s==='train'||s.endsWith('_id')?'id':s==='physics_validation'?'val':s.split('_').pop();
+const catVar=Object.fromEntries(CAT.map(c=>[c[0],c[2]]));
+const catName=Object.fromEntries(CAT.map(c=>[c[0],c[1]]));
+
+/* header */
+const nGroups=new Set(ROWS.map(r=>r.grp)).size, nCfGroups=new Set(ROWS.filter(r=>r.cf!=='none').map(r=>r.grp)).size, nDom=new Set(ROWS.map(r=>r.dom)).size;
+const hours=sum(ROWS.map(r=>r.dur))/3600;
+const idxNote=META.has_index?`index.json: ${META.n_written} of ${META.n_planned} written${META.n_failed?', '+META.n_failed+' failed':''}, ${META.in_progress?'run in progress':META.complete?'complete':'incomplete'}; validation ${!META.validated?'pending':META.validation_ok?'passed':'reported '+META.hard+' hard / '+META.soft+' soft findings'}.`:'index.json not written yet (it is created when the run starts).';
+$('#lede').textContent=`${META.dataset_id} v${META.dataset_version}: ${ROWS.length} planned episodes in ${nGroups} groups (${nCfGroups} with counterfactual siblings), drawn from ${new Set(ROWS.map(r=>r.part)).size} parts. ${idxNote}`;
+$('#kpis').innerHTML=[[ROWS.length,'episodes'],[nGroups,'groups'],[nDom,'distinct vehicle domains'],[sum(ROWS.map(r=>r.n)).toLocaleString(),'planned physics steps (200 Hz)'],[hours.toFixed(2)+' h','planned simulated time'],[ROWS.filter(r=>r.dt==='open_loop').length,'open-loop episodes'],[ROWS.filter(r=>r.cf!=='none').length,'counterfactual episodes']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+
+/* generic horizontal bar chart: rows = [{label,value,color,tip}] */
+function hbar(el,rows,{labelW=170,max}={}){
+  const W=640,rh=24,top=4,H=top+rows.length*rh+4,mx=max||Math.max(...rows.map(r=>r.value)),pw=W-labelW-44;
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  rows.forEach((r,i)=>{const y=top+i*rh,w=Math.max(2,r.value/mx*pw);
+    s+=`<text x="${labelW-8}" y="${y+rh/2+4}" text-anchor="end">${esc(r.label)}</text>`;
+    s+=`<g data-tip="${esc(r.tip||r.label+': '+r.value)}"><rect x="${labelW}" y="${y+3}" width="${pw}" height="${rh-6}" fill="transparent"/><path d="M${labelW} ${y+4}h${w-4}a4 4 0 0 1 4 4v${rh-14}a4 4 0 0 1-4 4h-${w-4}z" fill="${r.color}"/></g>`;
+    s+=`<text class="v" x="${labelW+w+6}" y="${y+rh/2+4}">${r.value}</text>`});
+  el.innerHTML=s+'</svg>';
+}
+
+function draw(){
+/* splits */
+const order=['train','val_id','test_id','val_ood_magnitude','test_ood_magnitude','val_ood_direction','test_ood_direction','val_ood_temporal','test_ood_temporal','val_ood_gust','test_ood_gust','val_ood_physics','test_ood_physics','test_ood_trajectory','physics_validation'];
+const sc=count(ROWS,r=>r.split);
+$('#leg-split').innerHTML=CAT.map(c=>`<span><i style="background:var(${c[2]})"></i>${c[1]}</span>`).join('');
+hbar($('#ch-split'),order.filter(k=>sc.has(k)).map(k=>({label:k,value:sc.get(k),color:css('--c-'+({id:'id',magnitude:'mag',direction:'dir',temporal:'tmp',gust:'gst',physics:'phy',trajectory:'trj',val:'val'})[catOf(k)]),tip:`${k}: ${sc.get(k)} episodes (${catName[catOf(k)]})`})),{labelW:170});
+
+/* scenarios */
+const scn=[...count(ROWS,r=>r.scn)].sort((a,b)=>b[1]-a[1]);
+const dtOf=t=>ROWS.find(r=>r.scn===t).dt;
+hbar($('#ch-scn'),scn.map(([k,v])=>({label:k,value:v,color:css(dtOf(k)==='open_loop'?'--c-mag':'--c-id'),tip:`${k}: ${v} episodes`})),{labelW:170});
+
+/* wind strip */
+const WC=[['id','ID'],['ood_magnitude','OOD magnitude'],['ood_direction','OOD direction'],['ood_temporal','OOD temporal'],['ood_gust','OOD gust']];
+const WW=860,wl=120,wr=24,rh=44,wt=10,xmax=Math.ceil(Math.max(...ROWS.map(r=>r.wm))+1),px=v=>wl+v/xmax*(WW-wl-wr),WH=wt+WC.length*rh+30;
+let s=`<svg viewBox="0 0 ${WW} ${WH}" role="img">`;
+for(let t=0;t<=xmax;t+=2){s+=`<line x1="${px(t)}" x2="${px(t)}" y1="${wt}" y2="${WH-24}" stroke="${css('--grid')}"/><text x="${px(t)}" y="${WH-8}" text-anchor="middle">${t}</text>`}
+s+=`<text x="${WW-wr}" y="${WH-8}" text-anchor="end">mean horizontal wind, m/s</text>`;
+s+=`<line x1="${px(4)}" x2="${px(4)}" y1="${wt}" y2="${WH-24}" stroke="${css('--fg2')}" stroke-dasharray="4 3"/>`;
+WC.forEach(([k,lab],i)=>{const cy=wt+i*rh+rh/2;
+  s+=`<text x="${wl-10}" y="${cy+4}" text-anchor="end">${lab}</text>`;
+  const sub=ROWS.filter(r=>r.wc===k);
+  sub.forEach((r,j)=>{const jit=((j*37)%11-5)*1.6;
+    s+=`<circle cx="${px(r.wm)}" cy="${cy+jit}" r="4.5" fill="${css(k==='id'?'--c-id':{ood_magnitude:'--c-mag',ood_direction:'--c-dir',ood_temporal:'--c-tmp',ood_gust:'--c-gst'}[k])}" stroke="${css('--panel')}" stroke-width="1.5" data-tip="${esc(r.id)}<br>${esc(r.wp)} wind, ${r.wm.toFixed(2)} m/s mean, ${r.wpk.toFixed(2)} peak<br>${esc(r.tmp)} / gust: ${esc(r.gust)}"/>`})});
+$('#ch-wind').innerHTML=s+'</svg>';
+hbar($('#ch-prof'),[...count(ROWS,r=>r.wp)].sort((a,b)=>b[1]-a[1]).map(([k,v])=>({label:k,value:v,color:css('--c-id'),tip:`${k}: ${v}`})),{labelW:110});
+const cls=[...[...count(ROWS,r=>r.tmp)].map(([k,v])=>({label:'temporal: '+k,value:v,color:css('--c-tmp'),tip:`temporal ${k}: ${v}`})),...[...count(ROWS,r=>r.gust)].map(([k,v])=>({label:'gust: '+k,value:v,color:css('--c-gst'),tip:`gust ${k}: ${v}`}))];
+hbar($('#ch-cls'),cls,{labelW:130});
+
+/* domains */
+const doms=[...new Map(ROWS.map(r=>[r.dom,r])).values()];
+const regCol={id:'--c-id',ood_physics:'--c-phy',ood_combination:'--c-mag',nominal:'--c-val'}, regName={id:'ID',ood_physics:'OOD physics',ood_combination:'OOD combination (physics + wind)',nominal:'Nominal'};
+$('#leg-dom').innerHTML=Object.keys(regCol).map(k=>`<span><i style="background:var(${regCol[k]})"></i>${regName[k]} (${doms.filter(d=>d.reg===k).length})</span>`).join('');
+const F=[['mass','mass'],['force_scale','thrust coefficient k_F'],['km_kf_ratio','torque/thrust ratio'],['motor_time_constant','motor time constant'],['rotor_drag_scale','rotor drag scale'],['body_drag_scale','body drag scale'],['inertia_shape_x','inertia shape x'],['inertia_shape_y','inertia shape y'],['inertia_shape_z','inertia shape z']];
+const lo=Math.min(0.75,...doms.flatMap(d=>F.map(([k])=>d.f[k]))),hi=Math.max(1.25,...doms.flatMap(d=>F.map(([k])=>d.f[k])));
+const DW=860,dl=170,dr=24,drh=34,dt_=6,dx=v=>dl+(v-lo)/(hi-lo)*(DW-dl-dr),DH=dt_+F.length*drh+26;
+s=`<svg viewBox="0 0 ${DW} ${DH}" role="img"><rect x="${dx(0.8)}" width="${dx(1.2)-dx(0.8)}" y="${dt_}" height="${F.length*drh}" fill="var(--band2)"/><rect x="${dx(0.9)}" width="${dx(1.1)-dx(0.9)}" y="${dt_}" height="${F.length*drh}" fill="var(--band1)"/>`;
+for(let t=Math.ceil(lo*20)/20;t<=hi+1e-9;t+=0.05){const major=Math.abs(t*10-Math.round(t*10))<1e-6;if(major)s+=`<text x="${dx(t)}" y="${DH-8}" text-anchor="middle">${t.toFixed(1)}</text>`}
+s+=`<line x1="${dx(1)}" x2="${dx(1)}" y1="${dt_}" y2="${dt_+F.length*drh}" stroke="${css('--fg2')}" stroke-dasharray="4 3"/>`;
+F.forEach(([k,lab],i)=>{const cy=dt_+i*drh+drh/2;s+=`<text x="${dl-10}" y="${cy+4}" text-anchor="end">${lab}</text>`;
+  doms.forEach((d,j)=>{const jit=((j*53)%9-4)*1.7;s+=`<circle cx="${dx(d.f[k])}" cy="${cy+jit}" r="3.6" fill="${css(regCol[d.reg])}" fill-opacity=".85" stroke="${css('--panel')}" stroke-width="1" data-tip="${esc(d.dom)} (${regName[d.reg]})<br>${lab}: ${d.f[k].toFixed(3)} × nominal<br>mass ${d.mass} kg"/>`})});
+$('#ch-dom').innerHTML=s+'</svg>';
+
+/* counterfactuals */
+const ck=count(ROWS.filter(r=>r.cf!=='none'),r=>r.cf), nGrp=new Set(ROWS.filter(r=>r.cf!=='none').map(r=>r.grp)).size;
+hbar($('#ch-cf'),[...ck].map(([k,v])=>({label:k,value:v,color:css(k==='baseline'?'--c-id':k==='wind-scale sibling'?'--c-mag':'--c-phy'),tip:`${k}: ${v} episodes`})).concat([{label:'no counterfactual',value:ROWS.filter(r=>r.cf==='none').length,color:css('--c-val'),tip:'stand-alone episodes'}]),{labelW:170});
+}
+
+/* parts table */
+const parts=[...new Set(ROWS.map(r=>r.part))];
+$('#tb-parts').innerHTML='<tr><th>Part</th><th>Episodes</th><th>Groups</th><th>Type</th><th>Domain region</th><th>Wind</th></tr>'+parts.map(p=>{const a=ROWS.filter(r=>r.part===p),u=k=>[...new Set(a.map(r=>r[k]))].join(', ');return `<tr><td>${p}</td><td>${a.length}</td><td>${new Set(a.map(r=>r.grp)).size}</td><td>${u('dt').replace(/_/g,' ')}</td><td>${u('reg')}</td><td>${u('wc').replace(/_/g,' ')}</td></tr>`}).join('');
+
+/* episode table */
+const opt=(el,vals)=>el.innerHTML='<option value="">All</option>'+vals.map(v=>`<option>${esc(v)}</option>`).join('');
+opt($('#f-part'),parts);opt($('#f-split'),[...new Set(ROWS.map(r=>r.split))]);opt($('#f-scn'),[...new Set(ROWS.map(r=>r.scn))].sort());
+function table(){
+  const p=$('#f-part').value,sp=$('#f-split').value,sn=$('#f-scn').value,q=$('#f-q').value.trim().toLowerCase();
+  const a=ROWS.filter(r=>(!p||r.part===p)&&(!sp||r.split===sp)&&(!sn||r.scn===sn)&&(!q||r.id.toLowerCase().includes(q)||r.grp.toLowerCase().includes(q)));
+  $('#f-count').textContent=a.length+' of '+ROWS.length;
+  $('#tb-eps').innerHTML='<tr><th>Episode</th><th>Split</th><th>Scenario</th><th>Controller</th><th>Wind</th><th>Mean wind m/s</th><th>Domain</th><th>Duration s</th><th>Counterfactual</th><th>Status</th></tr>'+a.map(r=>`<tr><td>${r.id}</td><td><span class="dot" style="background:var(${catVar[catOf(r.split)]})"></span>${r.split}</td><td>${r.scn}</td><td>${r.ctrl}</td><td>${r.wp}</td><td>${r.wm.toFixed(2)}</td><td>${r.reg}</td><td>${r.dur.toFixed(1)}</td><td>${r.cf}${r.replay?' (replay)':''}</td><td>${r.status||(r.failed?'failed':(META.has_index||META.live)?'pending':'—')}</td></tr>`).join('');
+}
+['#f-part','#f-split','#f-scn'].forEach(i=>$(i).addEventListener('change',table));$('#f-q').addEventListener('input',table);
+$('#ttl').textContent=META.dataset_id+' dataset report';document.title=META.dataset_id+' dataset report';
+draw();table();
+/* live mode: follow index.json while the generator runs */
+let LIVE_TIMER=null;
+function fmt(sec){sec=Math.max(0,Math.round(sec));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return (h?h+'h ':'')+(m||h?m+'m ':'')+s+'s'}
+function applyIndex(idx,age){
+  const st=new Map(idx.episodes.map(e=>[e.episode_id,e.status])), bad=new Set((idx.failures||[]).map(f=>f.episode_id));
+  ROWS.forEach(r=>{r.status=st.get(r.id)||null;r.written=st.has(r.id);r.failed=bad.has(r.id)});
+  const n=idx.n_written,nf=(idx.failures||[]).length,total=idx.n_planned,done=n+nf,term=idx.episodes.filter(e=>e.status!=='completed').length;
+  const stale=idx.in_progress&&age>120, state=idx.in_progress?(stale?'no update for '+fmt(age)+' (run may have stopped)':'running'):(idx.complete?'complete':'finished with problems');
+  $('#lv-state').textContent=state;
+  $('#lv-fill').style.width=(100*done/total)+'%';
+  $('#lv-fill').style.background=nf||stale?css('--c-mag'):css('--c-id');
+  const wall=idx.generation_wall_s||0, rate=n?wall/n:0, eta=idx.in_progress&&rate?(total-done)*rate:0;
+  $('#lv-kpis').innerHTML=[[n+' / '+total,'written'],[nf,'failed'],[term,'ended early (e.g. ground contact)'],[total-done,'remaining'],[fmt(wall),'elapsed (this invocation)'],[idx.in_progress&&eta?fmt(eta):'—','estimated time left']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+  $('#lv-note').textContent=(idx.validation&&idx.validation.ok!==null?'Validation: '+(idx.validation.ok?'passed':idx.validation.hard+' hard / '+idx.validation.soft+' soft findings')+'. ':'Validation runs when generation ends. ')+(nf?'Failed: '+idx.failures.map(f=>f.episode_id+' ('+f.error+')').join(', ')+'.':'');
+  $('#lv-recent').innerHTML='<tr><th>Latest episodes</th><th>Status</th><th>Steps</th></tr>'+idx.episodes.slice(-6).reverse().map(e=>`<tr><td>${esc(e.episode_id)}</td><td>${esc(e.status)}</td><td>${e.n_steps}</td></tr>`).join('');
+  table();
+  return idx.in_progress;
+}
+async function poll(){
+  let again=true;
+  try{
+    const r=await fetch('index.json',{cache:'no-store'});
+    if(r.ok){again=applyIndex(await r.json(),parseFloat(r.headers.get('X-Index-Age-S')||'0'));$('#live').hidden=false}
+    else{$('#live').hidden=false;$('#lv-state').textContent='waiting for the run to start'}
+  }catch(e){$('#live').hidden=false;$('#lv-state').textContent='server not reachable'}
+  clearTimeout(LIVE_TIMER);LIVE_TIMER=setTimeout(poll,again?5000:30000);
+}
+if(META.live)poll();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
+new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+</script>

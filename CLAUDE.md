@@ -32,12 +32,16 @@ docker exec isaac-sim bash -c 'cd /workspace/PhysiWorldUAV && source omnidrones_
 ```
 Commands (`<command>`):
 ```bash
-python -m pytest tests/cpu -q                       # CPU suite (~100 s), 132 tests
+python -m pytest tests/cpu -q                       # CPU suite (~170 s), 183 tests
 python -m pytest tests/isaac --isaac -q             # Isaac validation (~2+ min, needs GPU), 17 tests
 python -m physiworld_uav.experiments.generate plan     experiment=pilot
 python -m physiworld_uav.experiments.generate run      experiment=smoke
 python -m physiworld_uav.experiments.generate validate   --dataset data/datasets/<name>
 python -m physiworld_uav.experiments.generate regenerate --dataset data/datasets/<name> --episode <id>
+python -m physiworld_uav.data.statistical_validator --dataset data/datasets/<name>      # quality report + figures
+python -m physiworld_uav.training.run --dataset data/datasets/<name> --name <run> --model b2|b3|b4   # train a baseline
+python -m physiworld_uav.evaluation.run --dataset data/datasets/<name> --models b0 b1 b2=<ckpt>      # per-role evaluation
+scripts/run_baseline_gates.sh                       # pilot gates G1/G2 (in the container)
 ```
 Without the container, only pure-Python parts (config, planning, wind, force equations) are testable, and only if `omni_drones`/`torch` import.
 

@@ -21,8 +21,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -90,64 +92,125 @@ def _make_sim(phys: dict[str, Any], first: dict[str, Any]):
     return sim
 
 
+def _scan_shards(out: Path, order: dict[str, int]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Rebuild the index rows and the episode→shard map from the shards (the source of truth).
+
+    An episode group without metadata is a write that was interrupted; it is removed so the
+    episode is generated again.
+    """
+    import h5py
+    from physiworld_uav.data.metadata import EpisodeMetadata
+    rows: list[dict[str, Any]] = []
+    where: dict[str, str] = {}
+    for shard in sorted(out.glob("shard_*.h5")):
+        with h5py.File(shard, "a") as f:
+            eps = f.require_group("episodes")
+            for eid in list(eps.keys()):
+                if "metadata" not in eps[eid].attrs:
+                    log.warning("removing incomplete episode %s from %s", eid, shard.name)
+                    del eps[eid]
+                    continue
+                meta = EpisodeMetadata.from_json(eps[eid].attrs["metadata"])
+                rows.append({**meta.index_row(), "shard": shard.name})
+                where[eid] = shard.name
+    rows.sort(key=lambda r: order.get(r["episode_id"], len(order)))
+    return rows, where
+
+
 def run(cfg_dc, *, limit: int | None = None, episodes: Sequence[str] | None = None,
-        allow_unvalidated_forces: bool = False) -> Path:
-    out, manifest, prov = write_plan(cfg_dc)
+        allow_unvalidated_forces: bool = False, resume: bool = False) -> Path:
     cfg = to_plain(cfg_dc)
+    existing = sorted(dataset_dir(cfg).glob("shard_*.h5"))
+    if existing and not resume:
+        raise SystemExit(f"{dataset_dir(cfg)} already contains {len(existing)} shard(s). Use --resume to "
+                         "continue (skips episodes already written) or change dataset_version/dataset_id.")
+    out, manifest, prov = write_plan(cfg_dc)
     phys = cfg["physics"]
     nominal = DroneParams.from_dict(cfg["drone"])
     term = Termination.from_dict(cfg.get("limits", {}).get("termination"))
     rows = manifest.episodes
+    order = {r["episode_id"]: i for i, r in enumerate(rows)}
     if episodes:
         rows = [r for r in rows if r["episode_id"] in set(episodes)]
     rows = sorted(rows, key=lambda r: r.get("replay_of") is not None)   # Mode B baselines first
+    index_rows: list[dict[str, Any]] = []
+    where: dict[str, str] = {}
+    if resume:
+        index_rows, where = _scan_shards(out, order)
+        log.info("resume: %d episodes already written", len(index_rows))
+        rows = [r for r in rows if r["episode_id"] not in where]
     if limit is not None:
         rows = rows[:limit]
     if not rows:
+        if resume:                                              # nothing left: just finalise the index
+            report = validate_dataset_dir(out, index_rows)
+            _write_index(out, manifest, index_rows, report, 0.0, [])
+            log.info("nothing to generate; index refreshed")
+            return out
         raise SystemExit("no episodes selected")
     per_shard = int(cfg["dataset"]["storage"].get("episodes_per_shard", 200))
     storage = cfg["dataset"]["storage"]
+    ckpt_every = max(1, int(storage.get("index_checkpoint_every", 1)))
     sim = _make_sim(phys, rows[0])
     settings = _sim_settings(sim)
-    index_rows: list[dict[str, Any]] = []
-    where: dict[str, str] = {}
+    failures: list[dict[str, Any]] = []
     t0 = time.time()
-    writer = None
+
+    def checkpoint() -> None:
+        _write_index(out, manifest, index_rows, None, time.time() - t0, failures, in_progress=True)
+
     try:
         for i, row in enumerate(rows):
-            if i % per_shard == 0:
-                if writer:
-                    writer.close()
-                shard = f"shard_{i // per_shard:03d}.h5"
-                writer = ShardWriter(out / shard, compression=storage.get("compression"),
-                                     compression_opts=storage.get("compression_opts"))
-            replay = None
-            if row.get("replay_of"):
-                base_arrays, _ = read_episode(out / where[row["replay_of"]], row["replay_of"])
-                D = int(row["sim"]["control_decimation"])
-                replay = base_arrays["actions/rotor_cmd"][::D]
             ts = time.time()
-            arrays, meta = run_episode(sim, row, nominal, termination=term,
-                                       config_hash=prov["config_hash"],
-                                       dataset_version=manifest.dataset_version,
-                                       replay_commands=replay, sim_settings=settings,
-                                       allow_unvalidated_forces=allow_unvalidated_forces)
-            writer.write(arrays, meta)
+            try:
+                replay = None
+                if row.get("replay_of"):
+                    if row["replay_of"] not in where:
+                        raise RuntimeError(f"baseline {row['replay_of']} was not written (it failed or is missing)")
+                    base_arrays, _ = read_episode(out / where[row["replay_of"]], row["replay_of"])
+                    D = int(row["sim"]["control_decimation"])
+                    replay = base_arrays["actions/rotor_cmd"][::D]
+                arrays, meta = run_episode(sim, row, nominal, termination=term,
+                                           config_hash=prov["config_hash"],
+                                           dataset_version=manifest.dataset_version,
+                                           replay_commands=replay, sim_settings=settings,
+                                           allow_unvalidated_forces=allow_unvalidated_forces)
+            except Exception as exc:                    # one bad episode must not end the run
+                tb = traceback.format_exc()
+                log.error("[%d/%d] %s FAILED: %s: %s\n%s", i + 1, len(rows), row["episode_id"],
+                          type(exc).__name__, exc, tb)
+                failures.append({"episode_id": row["episode_id"], "error": type(exc).__name__,
+                                 "message": str(exc), "traceback": tb})
+                checkpoint()
+                continue
+            shard = f"shard_{len(index_rows) // per_shard:03d}.h5"
+            # The shard is closed after every episode, so a crash between episodes cannot leave it
+            # half-written; only the episode being written at that instant can be lost.
+            with ShardWriter(out / shard, compression=storage.get("compression"),
+                             compression_opts=storage.get("compression_opts")) as writer:
+                writer.write(arrays, meta)
             where[meta.episode_id] = shard
             index_rows.append({**meta.index_row(), "shard": shard})
             log.info("[%d/%d] %s %s %d steps in %.1fs", i + 1, len(rows), meta.episode_id,
                      meta.status, meta.n_steps, time.time() - ts)
+            if len(index_rows) % ckpt_every == 0:
+                checkpoint()
     except BaseException:
-        if writer:
-            writer.close()
+        # SimulationApp.close() ends the process, so log the traceback and save the index BEFORE closing.
+        log.exception("generation aborted after %d written episodes", len(index_rows))
+        try:
+            checkpoint()
+        except Exception:
+            log.exception("could not write the checkpoint index")
         sim.close()
         raise
-    if writer:
-        writer.close()
+    if failures:
+        log.warning("%d episode(s) failed and are missing from the dataset: %s", len(failures),
+                    ", ".join(f["episode_id"] for f in failures))
     # Validate and write the index BEFORE closing Isaac: SimulationApp.close()
     # terminates the interpreter, so nothing after it is guaranteed to run.
     report = validate_dataset_dir(out, index_rows)
-    _write_index(out, manifest, index_rows, report, time.time() - t0)
+    _write_index(out, manifest, index_rows, report, time.time() - t0, failures)
     log.info("dataset %s complete=%s", out, json.loads((out / "index.json").read_text())["complete"])
     sim.close()
     return out
@@ -164,17 +227,26 @@ def validate_dataset_dir(out: Path, index_rows: list[dict[str, Any]] | None = No
     return report
 
 
-def _write_index(out: Path, manifest: Manifest, rows: list[dict[str, Any]], report, wall_s: float) -> None:
+def _write_index(out: Path, manifest: Manifest, rows: list[dict[str, Any]], report, wall_s: float,
+                 failures: Sequence[dict[str, Any]] = (), in_progress: bool = False) -> None:
+    """Write index.json atomically. ``report=None`` means validation has not run yet (checkpoint)."""
+    validation = ({"ok": report.ok, "hard": len(report.hard), "soft": len(report.soft)}
+                  if report is not None else {"ok": None, "hard": None, "soft": None})
     index = {
         "dataset_id": manifest.dataset_id, "dataset_version": manifest.dataset_version,
         "experiment_id": manifest.experiment_id, "schema_version": SCHEMA_VERSION,
-        "complete": bool(report.ok) and len(rows) == len(manifest.episodes),
+        "complete": bool(report is not None and report.ok and not failures and not in_progress
+                         and len(rows) == len(manifest.episodes)),
+        "in_progress": bool(in_progress),
+        "failures": list(failures),
         "n_planned": len(manifest.episodes), "n_written": len(rows),
-        "validation": {"ok": report.ok, "hard": len(report.hard), "soft": len(report.soft)},
+        "validation": validation,
         "layout": model_layout(), "generation_wall_s": wall_s,
         "episodes": rows,
     }
-    (out / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True))
+    tmp = out / "index.json.tmp"
+    tmp.write_text(json.dumps(index, indent=2, sort_keys=True))
+    os.replace(tmp, out / "index.json")          # atomic: readers never see a half-written index
 
 
 def regenerate(out: Path, episode_id: str) -> dict[str, float]:
@@ -221,6 +293,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--dataset", type=Path, default=None)
     p.add_argument("--episode", default=None)
     p.add_argument("--log-level", default="INFO")
+    p.add_argument("--resume", action="store_true",
+                   help="continue an existing dataset: keep episodes already in the shards, generate only the rest")
     p.add_argument("--allow-unvalidated-forces", action="store_true",
                    help="development only: run force configs not marked validated (dataset is never complete)")
     a = p.parse_args(argv)
@@ -230,7 +304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         write_plan(compose(a.overrides))
     elif a.command == "run":
         print(run(compose(a.overrides), limit=a.limit, episodes=a.episodes,
-                  allow_unvalidated_forces=a.allow_unvalidated_forces))
+                  allow_unvalidated_forces=a.allow_unvalidated_forces, resume=a.resume))
     elif a.command == "validate":
         r = validate_dataset_dir(a.dataset)
         return 0 if r.ok else 1

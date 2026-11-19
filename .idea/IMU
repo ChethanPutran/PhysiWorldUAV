@@ -1,0 +1,10 @@
+No, a standard drone cannot maintain a complete, accurate state estimate using only IMU data for more than a few seconds due to rapid error accumulation from sensor drift and bias.
+
+While an IMU (Inertial Measurement Unit) provides high-frequency measurements of angular velocity and specific force, it lacks absolute references for position and heading. Accelerometers cannot distinguish between gravity and linear acceleration, making precise attitude and position estimation impossible without external aid or assumptions of zero velocity. Gyroscopes drift over time, causing orientation errors that compound into massive position errors when integrated. 
+
+Modern systems overcome this by fusing IMU data with other sensors:
+
+GNSS provides absolute position and velocity, correcting drift but failing in GPS-denied environments.
+Visual-Inertial Odometry (VIO) or LiDAR fusion uses cameras or lasers to estimate drift and correct position, enabling stable navigation in cluttered or indoor spaces. 
+Magnetometers help estimate yaw (heading) by referencing the Earth's magnetic field, though they are susceptible to interference.
+Recent research has demonstrated learning-based inertial odometry that uses an IMU and thrust commands to estimate state for high-speed drone racing, but this approach is limited to specific, seen trajectories and cannot generalize to arbitrary environments without external references.  For general autonomous flight, sensor fusion is essential to maintain a reliable and bounded state estimate. 

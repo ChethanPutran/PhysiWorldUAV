@@ -1,0 +1,38 @@
+## The core difference
+
+**Dreamer's latent is the state; yours is memory attached to a state.** In Dreamer (RSSM), the latent `(h_t, z_t)` is the only state the model has. It is abstract, self-supervised, and not tied to any physical quantity. In your model, the physical state `s` is explicit, supervised, and propagated by known physics. The latent `h` only supplies what physics cannot: context about the unmodeled world (wind, aerodynamics, parameter error).
+
+## Component comparison
+
+| Component | Dreamer (V3) | TD-MPC2 | Your model |
+|---|---|---|---|
+| **State representation** | Latent `(h_t, z_t)`, deterministic GRU plus stochastic categorical. Not interpretable. | Deterministic latent, decoder-free, not interpretable. | Explicit physical state `s` (p, v, R, ω) plus a latent `h` for context. |
+| **Encoder** | CNN or MLP on pixels or vectors, producing the posterior `q(z_t \| h_t, x_t)`. | MLP to latent. | MLP on (IMU, ω, u) feeding a recurrent `F_θ`. |
+| **Transition** | Fully learned: GRU for `h`, a prior MLP for `z`. | Learned MLP in latent space. | **Known physics + RK4, plus learned residual `d_θ`** in physical space. `h` is updated by a learned recurrence. |
+| **Decoder** | Reconstructs observations, reward and continue flag. Not used inside the rollout. | None. | Maps `h` to the physical state `ŝ`. |
+| **Stochasticity** | Yes (`z`), which captures uncertainty and multimodality. | No. | None as written. |
+| **Training signal** | Self-supervised reconstruction. | Latent consistency, reward and value. | **Supervised** by privileged simulator state. |
+| **Losses** | Reconstruction + dynamics KL + representation KL, with free bits and symlog. | Consistency + reward + value. | Per-component state error (SO(3) geodesic for attitude) + discounted multi-step rollout loss. |
+| **Multi-step accuracy** | Only indirectly. The KL trains the prior one step ahead. | Multi-step latent consistency. | Directly optimized via `L_roll` and the horizon curriculum. |
+| **Purpose** | Imagination for actor-critic policy learning. | Planning with MPC. | Open-loop prediction quality itself. |
+
+Some of these differences matter more than the table suggests:
+
+- **Your multi-step loss matches your goal better than Dreamer's loss matches Dreamer's goal.** Dreamer never directly penalizes open-loop error over many steps. PlaNet's "latent overshooting" was added to address exactly this. Your `L_roll` plus the horizon curriculum targets it directly.
+- **No KL term means nothing regularizes `h`.** The decoder supervision constrains `ŝ` but leaves `h` free to encode anything. Watch for it drifting or overfitting in long rollouts, and consider noise injection on `h` during training.
+- **Your approach is closer to hybrid physics-ML than to Dreamer.** The nearest relatives are residual dynamics for quadrotors (Neural-Fly, NeuroBEM, Neural Lander) and APHYNITY-style augmentation. What you add is the recurrent memory and the controlled B2 vs B3 comparison inside a world-model framework. The components are not individually novel, so frame the contribution as that comparison.
+
+## World state or agent state?
+
+The state should be whatever is sufficient to predict the future given the actions. What counts depends on what the sensors can see:
+
+- **Dreamer** observes pixels, which contain the world, so its latent must represent the agent and the world together.
+- **Your drone** observes only proprioception. The world is never seen directly. It only shows up as forces and torques on the drone.
+
+So your split is correct. Make `s` the **agent state**: the drone's physical state is Markov under the nominal dynamics. Make `h` the **hidden world/context state**: the part of the POMDP that is not observable, such as wind, aerodynamic mismatch and anything like motor or battery state. Think of `h` as a learned disturbance and context estimator, not a second copy of the state.
+
+To keep `h` from becoming an unconstrained second state, train it to be about the world. B6 (oracle disturbance) gives you the supervision signal. An auxiliary head that predicts the true disturbance force from `h`, used only in training, would do it. If you later add exteroception, such as a camera, `h` would then have to represent the world in the Dreamer sense.
+
+
+
+I wrote the Dreamer, TD-MPC2 and PlaNet details from memory, not from a fresh literature search. Check them against the original papers before putting them in the thesis.

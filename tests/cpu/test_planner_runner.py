@@ -101,8 +101,12 @@ def test_counterfactual_groups_change_one_variable(pilot):
 def test_runner_guards(pilot):
     _, m = pilot
     row = next(e for e in m.episodes if e["forces"]["name"] != "none")
+    check_guards(row)                                            # truth_default was approved (Q3): accepted
+    unvalidated = copy.deepcopy(row)
+    unvalidated["forces"]["config"]["validated"] = False
     with pytest.raises(RunnerGuardError):
-        check_guards(row)
+        check_guards(unvalidated)
+    check_guards(unvalidated, allow_unvalidated=True)            # dev flag only
 
 
 # -- runner with a mock simulator -------------------------------------------------------
@@ -189,7 +193,8 @@ def test_runner_with_wind_and_forces_logs_consistent_wrench():
     w = sample_wind(reg, np.random.default_rng(0), duration=row["duration_s"], dt=row["sim"]["physics_dt"],
                     profile="steady")
     row["wind"] = {**w.to_dict(), "limits": load_template("wind/regimes", "id")["limits"]}
-    row["forces"] = {"name": "truth_default", "config": load_template("forces", "truth_default")}
+    row["forces"] = {"name": "truth_default", "config": {**load_template("forces", "truth_default"),
+                                                         "validated": False}}      # exercise the unvalidated path
     nominal = DroneParams.from_dict(cfg["drone"])
     with pytest.raises(RunnerGuardError):
         check_guards(row)
@@ -203,3 +208,73 @@ def test_runner_with_wind_and_forces_logs_consistent_wrench():
     wind_dir = np.asarray(w.spec["steady"]["direction"])[:2]
     assert tot[0, :2] @ wind_dir > 0                                   # drag pushes downwind at rest
     assert meta.forces["applied"] and meta.drone_realised["total_mass_kg"] == pytest.approx(nominal.mass)
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_replay_of_short_baseline_is_truncated_and_flagged(pilot):
+    cfg, manifest = pilot
+    row = next(r for r in manifest.episodes if r.get("replay_of"))
+    D = int(row["sim"]["control_decimation"])
+    nominal = DroneParams.from_dict(cfg["drone"])
+    hover = np.tile(nominal.hover_command.reshape(1, -1), (row["n_steps"] // D, 1)).astype(np.float32)
+
+    def run(cmds):
+        return run_episode(MockSim(nominal, cfg["physics"]["dt"]), row, nominal, termination=Termination(),
+                           config_hash="h", dataset_version="0", replay_commands=cmds)
+
+    _, full = run(hover)
+    assert full.n_steps == row["n_steps"] and full.stats["replay_truncated_to_baseline"] is False
+    _, short = run(hover[:40])                                   # baseline ended after 40 control steps
+    assert short.n_steps == 40 * D and short.stats["replay_truncated_to_baseline"] is True
+    with pytest.raises(ValueError):
+        run(hover[:0])
+
+
+def test_index_records_failures_and_is_incomplete(tmp_path, pilot):
+    from physiworld_uav.experiments.generate import _write_index
+
+    class Report:
+        ok = True
+        hard: list = []
+        soft: list = []
+
+    _, manifest = pilot
+    _write_index(tmp_path, manifest, [], Report(), 1.0, [{"episode_id": "x", "error": "ValueError", "message": "m",
+                                                          "traceback": "tb"}])
+    idx = json.loads((tmp_path / "index.json").read_text())
+    assert idx["complete"] is False and idx["failures"][0]["episode_id"] == "x"
+
+
+def _mock_episode(row_index=0):
+    cfg = to_plain(compose(["experiment=smoke"]))
+    row = plan_dataset(cfg).episodes[row_index]
+    nominal = DroneParams.from_dict(cfg["drone"])
+    arrays, meta = run_episode(MockSim(nominal, cfg["physics"]["dt"]), row, nominal, termination=Termination(),
+                               config_hash="h", dataset_version="0")
+    return arrays, meta
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_scan_shards_rebuilds_rows_and_drops_interrupted_writes(tmp_path):
+    import h5py
+    from physiworld_uav.data.writer import ShardWriter
+    from physiworld_uav.experiments.generate import _scan_shards
+    arrays, meta = _mock_episode()
+    with ShardWriter(tmp_path / "shard_000.h5") as w:
+        w.write(arrays, meta)
+    with h5py.File(tmp_path / "shard_000.h5", "a") as f:               # a write killed before its metadata
+        f["episodes"].create_group("half_written").create_dataset("x", data=[1.0])
+    rows, where = _scan_shards(tmp_path, {meta.episode_id: 0})
+    assert [r["episode_id"] for r in rows] == [meta.episode_id] and where == {meta.episode_id: "shard_000.h5"}
+    assert rows[0]["shard"] == "shard_000.h5"
+    with h5py.File(tmp_path / "shard_000.h5", "r") as f:
+        assert "half_written" not in f["episodes"]
+
+
+def test_checkpoint_index_is_atomic_and_marks_in_progress(tmp_path, pilot):
+    from physiworld_uav.experiments.generate import _write_index
+    _, manifest = pilot
+    _write_index(tmp_path, manifest, [], None, 1.0, [], in_progress=True)
+    idx = json.loads((tmp_path / "index.json").read_text())
+    assert idx["in_progress"] is True and idx["complete"] is False and idx["validation"]["ok"] is None
+    assert not (tmp_path / "index.json.tmp").exists()

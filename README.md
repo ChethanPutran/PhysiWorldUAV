@@ -128,13 +128,18 @@ docker exec isaac-sim bash -c 'cd /workspace/PhysiWorldUAV && source omnidrones_
 
 | `<command>` | Purpose |
 |---|---|
-| `python -m pytest tests/cpu -q` | CPU tests (~100 s) |
+| `python -m pytest tests/cpu -q` | CPU tests (~170 s, 183 tests) |
 | `python -m pytest tests/isaac --isaac -q` | Isaac physics validation (~4 min, needs a GPU) |
 | `python -m physiworld_uav.experiments.generate plan experiment=pilot` | Write the manifest only |
 | `python -m physiworld_uav.experiments.generate run experiment=smoke` | Generate a small dataset |
 | `python -m physiworld_uav.experiments.generate run experiment=pilot` | Generate the pilot dataset |
 | `python -m physiworld_uav.experiments.generate validate --dataset data/datasets/<name>` | Validate a dataset |
 | `python -m physiworld_uav.experiments.generate regenerate --dataset data/datasets/<name> --episode <id>` | Reproduce one episode |
+| `python -m physiworld_uav.visualization.dataset_report --dataset data/datasets/<name>` | HTML report of the plan and index (`report.html` in the dataset folder) |
+| `python -m physiworld_uav.visualization.episode_plots --dataset data/datasets/<name> --episode <id>` | PNG quick-look of one episode (`--list` shows ids) |
+| `python -m physiworld_uav.data.statistical_validator --dataset data/datasets/<name>` | Data quality report: range, distribution, duplicates, correlation, physical consistency, coverage (`outputs/reports/<name>_quality/`) |
+| `python -m physiworld_uav.training.run --dataset data/datasets/<name> --name <run> --model b2` | Train a baseline (b2, b3, b4); `--tiny 8` for the overfit test, `--resume` to continue |
+| `python -m physiworld_uav.evaluation.run --dataset data/datasets/<name> --models b0 b1 b2=<checkpoint>` | Per-role evaluation table (JSON + Markdown) |
 
 Hydra overrides go after the command, e.g. `experiment=pilot`. Datasets are written to `data/datasets/<id>_v<version>/` and are not committed.
 

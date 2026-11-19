@@ -119,6 +119,16 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
     D = int(plan["sim"]["control_decimation"])
     n_steps = int(plan["n_steps"])
     n_ctrl = n_steps // D
+    replay_truncated = False
+    if plan["controller"]["mode"] == "replay":
+        # A baseline that ended early (e.g. ground contact) only provides that many commands:
+        # replay what exists and flag it, instead of failing the episode.
+        if replay_commands is None or replay_commands.shape[0] < 1:
+            raise ValueError(f"replay of {plan.get('replay_of')} has no baseline commands")
+        if replay_commands.shape[0] < n_ctrl:
+            n_ctrl = int(replay_commands.shape[0])
+            n_steps = n_ctrl * D
+            replay_truncated = True
 
     dom = plan["domain"]
     drone = Domain(domain_id=dom["domain_id"], region=dom["region"], factors=dom["factors"]).drone(nominal)
@@ -142,9 +152,6 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
     violations = {c: 0 for c in components}
     ref = reference_from_dict(plan["reference"]) if plan.get("reference") else None
     prog = OpenLoopProgram.from_dict(plan["open_loop"]) if plan.get("open_loop") else None
-    if mode == "replay":
-        if replay_commands is None or replay_commands.shape[0] < n_ctrl:
-            raise ValueError(f"replay of {plan.get('replay_of')} needs ≥ {n_ctrl} baseline commands")
     wind = WindManager(dict(plan["wind"]["spec"]), seed=int(plan["wind"]["seed"])).configure(
         seed=int(plan["wind"]["seed"]))
 
@@ -368,7 +375,8 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
                                        <= float(plan["forces"].get("config", {}).get("max_violation_fraction", 0.05))
                                        for c in components),
                "imu_valid_fraction": float(arrays["observations/imu_valid"].mean()),
-               "imu_k0_from_settle_step": bool(ic_at_rest)},
+               "imu_k0_from_settle_step": bool(ic_at_rest),
+               "replay_truncated_to_baseline": replay_truncated},
         config_hash=config_hash,
         generated_utc=datetime.now(timezone.utc).isoformat(),
     )
