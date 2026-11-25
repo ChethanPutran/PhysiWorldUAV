@@ -8,3 +8,112 @@ GNSS provides absolute position and velocity, correcting drift but failing in GP
 Visual-Inertial Odometry (VIO) or LiDAR fusion uses cameras or lasers to estimate drift and correct position, enabling stable navigation in cluttered or indoor spaces. 
 Magnetometers help estimate yaw (heading) by referencing the Earth's magnetic field, though they are susceptible to interference.
 Recent research has demonstrated learning-based inertial odometry that uses an IMU and thrust commands to estimate state for high-speed drone racing, but this approach is limited to specific, seen trajectories and cannot generalize to arbitrary environments without external references.  For general autonomous flight, sensor fusion is essential to maintain a reliable and bounded state estimate. 
+
+# Open-loop prediction and navigation: two questions
+
+## Question 1: Can IMU plus this model navigate a UAV with no other sensors?
+
+**Short answer.** No. The model predicts how the drone's state evolves. It does not estimate where the drone is in the world, and an IMU alone cannot supply that.
+
+### 1.1 What the IMU can and cannot tell you
+
+An IMU measures specific force (acceleration minus gravity, in body axes) and angular velocity. To recover pose from it, the measurements must be integrated, and integration accumulates error.
+
+| Quantity | Observable from IMU + `u`? | Reason |
+|---|---|---|
+| Angular velocity ω | Yes | Measured directly by the gyro |
+| Roll, pitch | Yes | Gravity direction in the accelerometer |
+| Yaw | No | Gravity is invariant to heading, so yaw drifts without a magnetometer or vision |
+| Velocity v | Weakly | Integrated acceleration drifts. Drag and thrust models add some constraint |
+| Position p | No | Double integration. Absolute position has no reference in the data |
+
+An accelerometer bias `b` produces a velocity error `δv ≈ b·t` and a position error `δp ≈ ½·b·t²`. For `b = 0.01 m/s²`, this is about 0.5 m after 10 s and about 4.5 m after 30 s. Gyro bias additionally tilts the estimated thrust direction, which feeds into acceleration error as well.
+
+### 1.2 What a learned dynamics model adds
+
+The model helps in three ways:
+- **Slower drift.** Knowing how thrust, drag and the learned wind effect relate commanded rotor speeds to motion lets dead reckoning separate "the rotors pushed" from "something else pushed". The raw-integration error grows more slowly.
+- **Some velocity information.** Drag ties velocity to measured force. This is the principle behind drag-aided inertial navigation for multirotors. It improves velocity and reduces drift, but it does not make position observable.
+- **Better prediction between corrections.** This is its natural role (section 1.4).
+
+None of this stops the drift. It only delays it. A learned model cannot create information about absolute position that the sensors do not contain.
+
+### 1.3 Additional obstacles specific to this work
+
+- **The model needs a correct initial state.** Every rollout starts from the true state `s_0`. In the simulator this is given. On hardware there is no such state unless an estimator provides it.
+- **Training and evaluation are in simulation only.** The sim-to-real gap is untested. IMU bias and noise on real hardware would probably be the first thing to break.
+- **Future actions must be known.** The model predicts "given these rotor commands". Navigation requires the commands the drone will actually fly, and a feedback controller generates them in response to disturbances.
+
+### 1.4 What the model is good for: the prediction step of a filter
+
+The realistic role is as the **process model** inside a state estimator (an EKF or a factor graph). Between sensor updates, the model propagates the state. An external reference then corrects accumulated drift.
+
+| Reference | Corrects |
+|---|---|
+| GNSS | Absolute position and velocity (outdoors) |
+| Camera (visual-inertial odometry) | Position, yaw, scale (textured scenes) |
+| Magnetometer | Yaw |
+| Barometer, rangefinder | Altitude |
+| Optical flow | Horizontal velocity near the ground |
+| Lidar, UWB, motion capture | Position in specific settings |
+
+A better process model gives the filter less error to correct and can improve its tuning. That is a natural follow-up to this thesis, but it is a different system and would need its own evaluation with sensor noise and a state estimator.
+
+### 1.5 A narrow exception
+
+Over a short segment from a known pose (a few seconds), IMU plus model dead reckoning may be accurate enough. Whether it is can be measured: report held-out drift against elapsed time under realistic IMU noise.
+
+---
+
+## Question 2: If we learn the dynamics and know the true initial state, can we compute any state?
+
+**Short answer.** Only in an idealized setting. In practice, the prediction stays accurate for a limited horizon, and that horizon is what the thesis measures.
+
+### 2.1 The idealized claim
+
+The dynamics are `ṡ = f(s, u, w)`, where `w` is the disturbance. If all of the following hold, the state at any time follows by integration:
+1. the model `f` is exact,
+2. the initial state `s_0` is exact,
+3. the future actions `u(t)` are known,
+4. the disturbance `w(t)` is known.
+
+### 2.2 Why each condition fails in practice
+
+**Model error.** `f_phys` is nominal, and `d_θ` is learned from finite data. Let `ε` be the acceleration error. Then the position error is about `½εt²`. For `ε = 0.05 m/s²`, that is about 0.1 m after 2 s and about 5.6 m after 15 s. Each step also starts from the previous step's wrong state, so errors compound through the dynamics. For a model with Lipschitz constant `L`, the worst-case error growth is exponential in `L·t`. Real behavior is usually milder but still grows with horizon.
+
+**Unknown disturbance.** Wind is time-varying and unobserved. In imagination there are no sensors, so the latent `h` receives no new information about the wind. Its estimate can hold or decay, but never improve. This is an information limit, not a modeling defect. B6 (oracle disturbance) measures how much error it causes, and the B3 − B6 gap is the lost wind information.
+
+**Future actions.** The model predicts for a given action sequence. On a real vehicle the actions come from a controller reacting to disturbances, so they are not known in advance. In closed-loop data, recorded `u` also contains information about the disturbance, which leaks into evaluation (Mode A leakage). Mode B fixed-action replay pairs avoid this.
+
+**Sensitivity.** A small attitude error tilts the thrust vector, which changes acceleration, velocity and then position. Aggressive maneuvers amplify this effect.
+
+**Initial state.** Simulation gives `s_0` exactly. A real system gets it from an estimator with its own error, and position and yaw are unobservable from the IMU alone.
+
+### 2.3 What this means for the thesis
+
+The evaluation answers the question directly. The error-vs-horizon curves show how long the prediction stays accurate from a true `s_0`. The claim to make is:
+
+> The physics prior and the learned residual **extend the horizon** over which open-loop prediction stays accurate, and **slow the growth of error**, compared with a pure neural model (B2) and physics alone (B1).
+
+The claim not to make is that the state can be computed for any time, or that the model can replace state estimation.
+
+State these scope points explicitly:
+- Rollouts start from the true state at the end of the context window, so the evaluation measures dynamics, not state estimation.
+- The B3 − B6 gap bounds how much any method could gain without wind information.
+- Results are from simulation. Hardware transfer is untested.
+
+---
+
+## Short version for the thesis
+
+> **Scope and limitations.** The proposed model predicts the evolution of a UAV's physical state over a finite horizon given a known initial state and known control inputs. It is not a standalone navigation system. An IMU alone does not render absolute position or yaw observable, and learned dynamics cannot supply information the sensors do not contain. Open-loop prediction error grows with horizon because of residual model error and because disturbances such as wind are unobserved during imagination. The contribution is to extend the horizon over which prediction remains accurate. In deployment, such a model would serve as the prediction step of a state estimator that receives external position and heading references.
+
+---
+
+## Caveats
+
+- The numerical drift values are illustrative, computed from simple bias-integration formulas, and are not measurements of your model. Your held-out error-vs-horizon curves will give the real figures.
+- The exponential worst-case bound is a general property of dynamical systems and is usually pessimistic. I haven't estimated `L` for your model.
+- For the drag-aided inertial navigation reference and the sensor table, check the literature before citing specifics.
+
+If you'd like this as LaTeX for the thesis, I can convert it to match your section style.

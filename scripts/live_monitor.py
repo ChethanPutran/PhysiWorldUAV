@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Live view of a training sweep: progress, timing, CPU, GPU and memory per run (stdlib only). Run on the HOST.
+
+    python3 scripts/live_monitor.py --sweep outputs/sweeps/fix_v1            # refresh every 5 s, Ctrl-C to stop
+    python3 scripts/live_monitor.py --sweep outputs/sweeps/fix_v1 --once      # print once (also for logs / pasting)
+    python3 scripts/live_monitor.py --sweep outputs/sweeps/fix_v1 --html live.html   # a page that reloads itself every refresh
+
+In-place refresh needs a real terminal (ssh, tmux, a normal shell): the screen is cleared with ANSI codes. Where the output is not
+a terminal (Claude Code's `!` panel, a pipe, a file) every refresh would be appended, so the script then refuses to loop and tells
+you to use --html (open the file in a browser or the IDE; it reloads every `interval` seconds) or `watch -n 5 ... --once`.
+
+Per run (from outputs/experiments/<run>/metrics.jsonl, the process in /proc and nvidia-smi):
+  state, GPU, epoch, curriculum horizon, elapsed, training seconds per epoch, per training episode and episodes/s,
+  validation seconds, windows/s, validation position RMSE at the validation horizon, best so far (epoch),
+  CPU % of one core, resident memory, GPU memory of the process. Above the table: per-GPU utilisation and memory, host load,
+  job counts. Training time per epoch / per episode excludes validation (validation is shown separately).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+TICKS = os.sysconf("SC_CLK_TCK")
+
+
+def procs() -> dict[str, dict]:
+    out = {}
+    for p in Path("/proc").iterdir():
+        if not p.name.isdigit():
+            continue
+        try:
+            args = [x.decode(errors="replace") for x in (p / "cmdline").read_bytes().split(b"\0")]
+        except OSError:
+            continue
+        if not any("physiworld_uav.training.run" in x for x in args) or (args and args[0].endswith(("bash", "sh"))):
+            continue
+        d = dict(zip(args, args[1:]))
+        if "--name" in d:
+            out[d["--name"]] = {"pid": int(p.name)}
+    return out
+
+
+def cpu_ticks(pid: int):
+    try:
+        f = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        return float(f[11]) + float(f[12])
+    except (OSError, IndexError):
+        return None
+
+
+def rss_mb(pid: int):
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmRSS"):
+                return float(line.split()[1]) / 1024
+    except OSError:
+        pass
+    return None
+
+
+def smi(query: str, kind: str):
+    try:
+        r = subprocess.run(["nvidia-smi", f"--query-{kind}={query}", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
+        return [[c.strip() for c in l.split(",")] for l in r.stdout.strip().splitlines() if l.strip()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def last_metrics(path: Path):
+    try:
+        lines = path.read_text().strip().splitlines()
+    except OSError:
+        return None, 0
+    return (json.loads(lines[-1]) if lines else None), len(lines)
+
+
+RUN_RE = re.compile(r"^fx_(v0\d)_(b2|b3|b4_rw|b4|b5a|b5b)(?:_(.+?))?_s(\d+)$")
+
+
+def run_series(exp_root: Path, st: dict, refs=("v06_b3",)) -> list[dict]:
+    """Per-epoch curves of every run of the sweep (and reference runs), for the charts of the live page."""
+    out = []
+    names = list(st) + [r for r in refs if r not in st]
+    for name in names:
+        m = RUN_RE.match(name)
+        if m:
+            ds, model, var, seed = m.group(1), m.group(2), m.group(3) or "", int(m.group(4))
+        elif name in refs:                                   # an earlier run used as a reference: <ds>_<model>
+            ds, model = name.split("_", 1); var, seed = "ref", 0
+        else:
+            continue
+        f = exp_root / name / "metrics.jsonl"
+        if not f.exists():
+            continue
+        ep = []
+        for line in f.read_text().splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue                                   # a half-written last line
+            v = r.get("val", {}).get("pos_rmse_m", {})
+            ep.append({"e": r["epoch"], "h": r["horizon"], "roll": r["train"].get("roll"), "total": r["train"].get("total"),
+                       "v1": v.get("1"), "vk": r.get("metric"), "best": r.get("best_global"), "t": r.get("epoch_s"), "vt": r.get("val_s")})
+        out.append({"name": name, "ds": ds, "model": model, "variant": var, "seed": seed, "ref": name in refs and not m,
+                    "state": st.get(name, {}).get("state", "done"), "epochs": ep})
+    return out
+
+
+def hms(s):
+    s = int(s or 0)
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+
+
+def render(sweep: Path, exp_root: Path, prev: dict) -> tuple[str, dict]:
+    st = json.loads((sweep / "status.json").read_text()) if (sweep / "status.json").exists() else {}
+    pr, now = procs(), time.time()
+    gpu_of_pid = {int(r[0]): float(r[1]) for r in smi("pid,used_memory", "compute-apps") if r and r[0].isdigit()}
+    gpus = smi("index,utilization.gpu,memory.used,memory.total", "gpu")
+    cnt = {k: sum(v["state"] == k for v in st.values()) for k in ("running", "queued", "done", "failed")}
+    head = [f"sweep {sweep.name}   {time.strftime('%H:%M:%S')}   host load {os.getloadavg()[0]:.0f}   jobs: " +
+            "  ".join(f"{k} {v}" for k, v in cnt.items()) + f"   of {len(st)}"]
+    head.append("GPU  " + "   ".join(f"[{g[0]}] util {g[1]:>3}%  mem {float(g[2]) / 1024:5.1f}/{float(g[3]) / 1024:.0f} GB" for g in gpus))
+    cols = ["run", "state", "gpu", "ep", "h", "elapsed", "train s/ep", "s/episode", "ep/s", "val s", "windows/s", "val k RMSE", "best (ep)", "CPU %", "RSS MB", "GPU MB"]
+    rows, new_prev = [], {}
+    order = {"running": 0, "failed": 1, "queued": 3, "done": 2}
+    for name, j in sorted(st.items(), key=lambda kv: (order.get(kv[1]["state"], 9), kv[0])):
+        m, n = last_metrics(exp_root / name / "metrics.jsonl")
+        p = pr.get(name)
+        cpu = None
+        if p:
+            tk = cpu_ticks(p["pid"])
+            if tk is not None:
+                new_prev[name] = (now, tk)
+                if name in prev and now > prev[name][0]:
+                    cpu = 100.0 * (tk - prev[name][1]) / TICKS / (now - prev[name][0])
+        if j["state"] == "queued":
+            rows.append([name, "queued"] + [""] * 14); continue
+        elapsed = (now - j["t0"]) if j["state"] == "running" and "t0" in j else j.get("wall_s")
+        rows.append([name, j["state"], j.get("gpu", ""), n or "", m["horizon"] if m else "", hms(elapsed),
+                     f"{m['epoch_s']:.1f}" if m else "", f"{m['s_per_episode']:.2f}" if m and "s_per_episode" in m else "",
+                     f"{m['episodes_per_s']:.1f}" if m and "episodes_per_s" in m else "", f"{m['val_s']:.1f}" if m and "val_s" in m else "",
+                     f"{m['windows_per_s']:.0f}" if m else "", f"{m['metric']:.4f}" if m else "",
+                     (f"{m['best_global']:.4f}" if m and "best_global" in m else (f"{m['best']:.4f}" if m else "")) if m else "",
+                     f"{cpu:.0f}" if cpu is not None else "", f"{rss_mb(p['pid']):.0f}" if p and rss_mb(p["pid"]) else "",
+                     f"{gpu_of_pid.get(p['pid'], 0):.0f}" if p and p["pid"] in gpu_of_pid else ""])
+    w = [max(len(str(c)), *(len(str(r[i])) for r in rows)) if rows else len(c) for i, c in enumerate(cols)]
+    line = lambda r: "  ".join(str(x).rjust(w[i]) if i else str(x).ljust(w[i]) for i, x in enumerate(r))  # noqa: E731
+    return "\n".join(head + ["", line(cols), "  ".join("-" * x for x in w)] + [line(r) for r in rows]), new_prev
+
+
+PAGE = r"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Training live</title>
+<style>
+:root{--bg:#fff;--fg:#1c1c1c;--mut:#666;--grid:#e6e6e6;--axis:#999;--card:#f6f6f6}
+@media (prefers-color-scheme:dark){:root{--bg:#121212;--fg:#e6e6e6;--mut:#9a9a9a;--grid:#2a2a2a;--axis:#666;--card:#1b1b1b}}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.4 system-ui,sans-serif;padding:16px}
+h1{font-size:16px;margin:0 0 4px}.sub{color:var(--mut);margin-bottom:10px}
+.ctl{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:8px 0 6px}
+select{background:var(--card);color:var(--fg);border:1px solid var(--axis);padding:3px 6px;border-radius:4px}
+.chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:2px 8px;border-radius:10px;background:var(--card);margin:0 6px 4px 0;user-select:none}
+.chip i{display:inline-block;width:14px;height:3px;border-radius:2px}.chip.off{opacity:.35}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px}
+.card{background:var(--card);border-radius:8px;padding:8px 10px}.card h2{font-size:13px;margin:0 0 2px}
+svg{width:100%;height:240px;display:block}svg text{fill:var(--mut);font-size:10px}
+pre{background:var(--card);padding:10px;border-radius:8px;overflow:auto;font:12px/1.35 ui-monospace,monospace;margin-top:12px}
+#tip{position:fixed;pointer-events:none;background:var(--bg);border:1px solid var(--axis);padding:4px 8px;border-radius:4px;display:none;font-size:12px;z-index:9}
+</style>
+<h1 id="title">Training live</h1><div class="sub" id="sub"></div>
+<div class="ctl"><label>Model <select id="model"></select></label><label>Dataset <select id="ds"></select></label>
+<label>Runs <select id="which"><option value="all">all of the selection</option><option value="running">running only</option></select></label>
+<label>Y scale <select id="scale"><option value="log">log</option><option value="lin">linear</option></select></label>
+<span>dashed = seed 1, dotted = seed 2, grey = reference run (earlier)</span></div>
+<div id="chips"></div>
+<div class="grid" id="charts"></div>
+<pre id="tbl"></pre><div id="tip"></div>
+<script>
+const COL=["#0072B2","#E69F00","#009E73","#CC79A7","#56B4E9","#D55E00","#888888"];
+const CH=[{k:"roll",t:"Training rollout loss (weighted, per epoch)"},{k:"vk",t:"Validation position RMSE at the validation horizon [m]"},
+          {k:"v1",t:"Validation position RMSE, one step (k=1) [m]"},{k:"t",t:"Training seconds per epoch"}];
+let DATA=null,off=new Set();const $=id=>document.getElementById(id);
+function nice(a,b,n){const r=(b-a)||1,s=Math.pow(10,Math.floor(Math.log10(r/n))),e=r/n/s,m=e>5?10:e>2?5:e>1?2:1,st=m*s;const o=[];for(let v=Math.ceil(a/st)*st;v<=b+1e-12;v+=st)o.push(v);return o}
+function fmt(v){return v==null?"":(Math.abs(v)>=1000||(v!==0&&Math.abs(v)<0.01))?v.toExponential(1):(+v.toPrecision(3)).toString()}
+function groups(runs){const g=[];runs.forEach(r=>{const k=r.ref?"reference":(r.variant||"base")+" ("+r.ds+")";if(!g.includes(k))g.push(k)});return g}
+function colorOf(g,gs){return g==="reference"?"#888888":COL[gs.filter(x=>x!=="reference").indexOf(g)%COL.length]}
+function draw(card,ch,runs,gs,log){
+  const W=card.clientWidth-20,H=240,m={l:52,r:8,t:6,b:22};const lines=[];
+  runs.forEach(r=>{const g=r.ref?"reference":(r.variant||"base")+" ("+r.ds+")";if(off.has(g))return;
+    const pts=r.epochs.filter(e=>e[ch.k]!=null&&(!log||ch.k==="t"&&false||e[ch.k]>0)).map(e=>[e.e,e[ch.k],e.h]);
+    if(pts.length)lines.push({r,g,pts,c:colorOf(g,gs),d:r.seed===1?"6 3":r.seed===2?"2 3":""})});
+  const all=lines.flatMap(l=>l.pts);let svg=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
+  if(!all.length){card.querySelector(".plot").innerHTML=svg+`<text x="${m.l}" y="40">no data yet</text></svg>`;return}
+  const L=ch.k!=="t"&&log,tr=v=>L?Math.log10(v):v;
+  let x0=1,x1=Math.max(...all.map(p=>p[0])),y0=Math.min(...all.map(p=>tr(p[1]))),y1=Math.max(...all.map(p=>tr(p[1])));
+  if(!L)y0=Math.min(0,y0);if(y1===y0)y1=y0+1;const px=x=>m.l+(x-x0)/Math.max(x1-x0,1)*(W-m.l-m.r),py=y=>H-m.b-(tr(y)-y0)/(y1-y0)*(H-m.t-m.b);
+  nice(y0,y1,4).forEach(t=>{const y=H-m.b-(t-y0)/(y1-y0)*(H-m.t-m.b);svg+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${m.l-4}" y="${y+3}" text-anchor="end">${fmt(L?Math.pow(10,t):t)}</text>`});
+  nice(x0,x1,6).forEach(t=>{svg+=`<text x="${px(t)}" y="${H-6}" text-anchor="middle">${t}</text>`});
+  svg+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--axis)"/><line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${H-m.b}" stroke="var(--axis)"/>`;
+  lines.forEach(l=>{svg+=`<polyline fill="none" stroke="${l.c}" stroke-width="2" ${l.d?`stroke-dasharray="${l.d}"`:""} points="${l.pts.map(p=>px(p[0]).toFixed(1)+","+py(p[1]).toFixed(1)).join(" ")}"/>`;
+    const q=l.pts[l.pts.length-1];if(l.r.state==="running")svg+=`<circle cx="${px(q[0])}" cy="${py(q[1])}" r="3.5" fill="${l.c}" stroke="var(--bg)" stroke-width="2"/>`});
+  const box=card.querySelector(".plot");box.innerHTML=svg+"</svg>";
+  box.onmousemove=ev=>{const b=box.getBoundingClientRect(),mx=(ev.clientX-b.left)/b.width*W,my=(ev.clientY-b.top)/b.height*H;let best=null,bd=1e9;
+    lines.forEach(l=>l.pts.forEach(p=>{const d=Math.hypot(px(p[0])-mx,py(p[1])-my);if(d<bd){bd=d;best={l,p}}}));const tip=$("tip");
+    if(best&&bd<30){tip.style.display="block";tip.style.left=ev.clientX+12+"px";tip.style.top=ev.clientY+12+"px";tip.innerHTML=`<b>${best.l.r.name}</b><br>epoch ${best.p[0]} · horizon ${best.p[2]}<br>${ch.k==="t"?"":""}${fmt(best.p[1])}`}else tip.style.display="none"};
+  box.onmouseleave=()=>$("tip").style.display="none"}
+function render(){
+  if(!DATA)return;const runs=DATA.runs;
+  const ms=[...new Set(runs.map(r=>r.model))],dss=[...new Set(runs.map(r=>r.ds))];
+  const fill=(id,vals,all)=>{const el=$(id),cur=el.value;if(el.options.length!==vals.length+(all?1:0)){el.innerHTML=(all?'<option value="*">all</option>':"")+vals.map(v=>`<option>${v}</option>`).join("");if(cur&&[...el.options].some(o=>o.value===cur))el.value=cur}};
+  fill("model",ms,true);fill("ds",dss,true);
+  const sel=runs.filter(r=>($("model").value==="*"||r.model===$("model").value||r.ref&&r.model===$("model").value)&&($("ds").value==="*"||r.ds===$("ds").value)&&($("which").value==="all"||r.state==="running"));
+  const gs=groups(sel);$("chips").innerHTML=gs.map(g=>`<span class="chip ${off.has(g)?"off":""}" data-g="${g}"><i style="background:${colorOf(g,gs)}"></i>${g}</span>`).join("");
+  document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{off.has(c.dataset.g)?off.delete(c.dataset.g):off.add(c.dataset.g);render()});
+  if(!$("charts").children.length)$("charts").innerHTML=CH.map((c,i)=>`<div class="card" id="c${i}"><h2>${c.t}</h2><div class="plot"></div></div>`).join("");
+  CH.forEach((c,i)=>draw($("c"+i),c,sel,gs,$("scale").value==="log"));
+  $("title").textContent="Training live: sweep "+DATA.sweep;$("sub").textContent=DATA.header;$("tbl").textContent=DATA.table}
+async function tick(){try{DATA=await (await fetch("live.json?"+Date.now())).json();render()}catch(e){$("sub").textContent="waiting for live.json ..."}}
+["model","ds","which","scale"].forEach(id=>$(id).onchange=render);addEventListener("resize",render);tick();setInterval(tick,5000);
+</script>"""
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sweep", type=Path, required=True)
+    ap.add_argument("--exp-root", type=Path, default=Path("outputs/experiments"))
+    ap.add_argument("--interval", type=float, default=5.0)
+    ap.add_argument("--once", action="store_true")
+    ap.add_argument("--html", type=Path, help="write the table to this HTML file every interval (auto-reloading page) instead of printing")
+    a = ap.parse_args()
+    prev: dict = {}
+    if a.once:                                           # two samples 2 s apart so the CPU % is defined
+        _, prev = render(a.sweep, a.exp_root, prev); time.sleep(2)
+        print(render(a.sweep, a.exp_root, prev)[0]); return
+    if a.html:
+        a.html.write_text(PAGE)                              # static page: it fetches live.json every 5 s and redraws in place
+        jpath = a.html.with_name("live.json")
+        try:
+            while True:
+                text, prev = render(a.sweep, a.exp_root, prev)
+                st = json.loads((a.sweep / "status.json").read_text()) if (a.sweep / "status.json").exists() else {}
+                lines = text.split("\n")
+                payload = {"sweep": a.sweep.name, "updated": time.strftime("%H:%M:%S"), "header": lines[0] + "\n" + lines[1],
+                           "table": "\n".join(lines[3:]), "runs": run_series(a.exp_root, st)}
+                tmp = jpath.with_suffix(".tmp"); tmp.write_text(json.dumps(payload, separators=(",", ":"))); tmp.replace(jpath)
+                time.sleep(a.interval)
+        except KeyboardInterrupt:
+            return
+    if not sys.stdout.isatty():
+        print("stdout is not a terminal: an in-place refresh is impossible here (each refresh would be appended).\n"
+              "Run this in a real terminal, or use  --html live.html  (open it in a browser / the IDE), or  watch -n 5 'python3 scripts/live_monitor.py --sweep "
+              f"{a.sweep} --once'.\n")
+        print(render(a.sweep, a.exp_root, prev)[0]); return
+    try:
+        while True:
+            text, prev = render(a.sweep, a.exp_root, prev)
+            print("\033[2J\033[H" + text + "\n\n(Ctrl-C to stop; the training continues)", flush=True)
+            time.sleep(a.interval)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

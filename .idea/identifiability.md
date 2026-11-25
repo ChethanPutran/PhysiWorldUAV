@@ -1,15 +1,3 @@
-> **Erratum (2026-11-16, decision D1 in `docs/audit/run2_implementation_plan.md`):** wind
-> magnitudes written in **N** in this document (e.g. "≤ 4 N", "5–8 N") should be read as wind
-> **velocity in m/s**, consistent with the thesis and `docs/requirement.md` (ID |w| ∈ [0, 4] m/s,
-> OOD (4, 8] m/s). The disturbance force depends on the drag model and is logged as auxiliary
-> ground truth only. The rest of this document is unchanged.
-
-# Why Hover-Only Data Cannot Train a Wind-Aware World Model
-
-> **Erratum (2026-11-16, decision D1 in `docs/audit/run2_implementation_plan.md`):** wind magnitudes written in **N** in this document (e.g. "≤ 4 N", "5–8 N") should be read as wind **velocity in m/s**, consistent with the thesis and `docs/requirement.md` (ID |w| ∈ [0, 4] m/s, OOD (4, 8] m/s). The disturbance force depends on the drag model and is logged as auxiliary ground truth only. The rest of this document is unchanged.
-
----
-
 ## 1. The Central Problem: Identifiability
 
 You've identified the central problem yourself, and it is real. Let me spell out exactly what goes wrong, and then give the fix.
@@ -22,13 +10,12 @@ $$
 \mathcal{L} = \left\| s_{t+1} - \left[ f_{\text{phys}}(s_t, u_t) + d_\theta(h_t, u_t) \right] \right\|^2
 $$
 
-with \(h_t = E_P(a^{\text{IMU}}_t, \omega^{\text{IMU}}_t, u_t)\).
 
 ### 1.2 The Degeneracy Under Hover
 
 Under hover with your P-D altitude hold **and no horizontal controller**, three things are true:
 
-| Wind (N) | State trajectory | Action trajectory | Residual needed |
+| Wind (m/s) | State trajectory | Action trajectory | Residual needed |
 |---|---|---|---|
 | 0 | \(s_0 \to s_1 \to s_2\) (constant) | constant | ~0 |
 | 2 | \(s_0 \to s_1 \to s_2\) (constant, **same**) | drifting (drone pushed) | compensates wind |
@@ -46,7 +33,7 @@ If the controller holds position perfectly, **the state trajectory is identical 
 
 ## 2. Why the IMU Does Not Save You (Fully)
 
-You might argue: "But the IMU does carry the wind signal — accelerometer reads the compensating thrust, gyro shows the attitude correction." That is true, and \(E_P(a_t, \omega_t, u_t)\) can in principle infer \(F_w\). But three problems remain.
+You might argue: "But the IMU does carry the wind signal — accelerometer reads the compensating thrust, gyro shows the attitude correction." That is true, and F can in principle infer wind. But three problems remain.
 
 ### 2.1 Problem 1 — The residual is trained on state prediction, not wind prediction
 
