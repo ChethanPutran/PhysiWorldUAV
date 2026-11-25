@@ -639,6 +639,30 @@ class SimulationInterface:
         finally:
             self.play()
 
+    def reset_to_canonical_pose(self) -> None:
+        """Articulation to a fixed pose (position (0, 0, 1), identity attitude, zero velocities, rotor joints at angle 0 / velocity 0).
+
+        ``bind_domain`` / ``realised`` read link poses from PhysX in float32 world coordinates and form ``rotor_pos − base_pos`` rotated into
+        the body frame, so the realised composite inertia and centre of mass carried rounding that depended on where the previous episode
+        ended (and on the rotor joint angles): ~1e-9 (one float32 ulp). The controller (policy "true") is built from these values, whose
+        mixer then differed by an ulp and occasionally changed a rotor command by one ulp: an episode's output depended on the episodes that
+        ran before it in the same process. Call before ``bind_domain``; ``reset_episode`` restores the planned initial state afterwards."""
+        self.ensure_ready()
+        drone = self._drone
+        dev = torch.device(self.cfg.tensor_device)
+        self.pause()
+        try:
+            drone.set_world_poses(torch.tensor([[0.0, 0.0, 1.0]], dtype=torch.float32, device=dev),
+                                  torch.tensor([[1.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=dev))
+            drone.set_velocities(torch.zeros(1, 6, dtype=torch.float32, device=dev))
+            view = drone._view
+            if getattr(view, "num_dof", 0):
+                zeros = torch.zeros(1, view.num_dof, dtype=torch.float32, device=dev)
+                view.set_joint_positions(zeros)
+                view.set_joint_velocities(zeros)
+        finally:
+            self.play()
+
     def bind_domain(self, params, dt: float) -> dict[str, Any]:
         """Write a domain's parameters into PhysX/OmniDrones and return the realised values."""
         from physiworld_uav.drones.sim_binding import bind, realised

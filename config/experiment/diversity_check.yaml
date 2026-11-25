@@ -1,0 +1,67 @@
+# Verification of the priority-1 diversity additions (2026-11-24): every addition appears in at least one part.
+#   div_start : perturbed initial states (config/initial_conditions/randomized: small initial velocity and rates)
+#   div_long  : longer episodes (20-30 s)
+#   div_wind  : wind regime id_diverse (Dryden turbulence, composite = level switch + overlay)
+#   div_env   : air-density randomisation (domain randomized_env)
+#   div_gain  : controller gain randomisation (position and attitude-hold gains x 0.7 ... 1.3)
+# Scratch experiment for checking the machinery in the real simulator, not a dataset to train on.
+name: diversity_check
+dataset_id: physiworld_divcheck
+dataset_version: 0.1.0
+seed: 20261124
+parts:
+  - name: div_start
+    roles: {train: 1.0}
+    n_groups: 4
+    domain: randomized
+    n_domains: 3
+    wind_regime: id
+    forces: truth_default
+    mix:
+      - {scenario: hover,       weight: 0.34, overrides: {initial_conditions: randomized}}
+      - {scenario: translation, weight: 0.33, overrides: {initial_conditions: randomized}}
+      - {scenario: circle,      weight: 0.33, overrides: {initial_conditions: randomized}}
+  - name: div_long
+    roles: {train: 1.0}
+    n_groups: 3
+    domain: randomized
+    n_domains: 3
+    wind_regime: id
+    forces: truth_default
+    mix:
+      - {scenario: hover,       weight: 0.34, overrides: {duration_s: [20.0, 30.0]}}
+      - {scenario: translation, weight: 0.33, overrides: {duration_s: [20.0, 30.0]}}
+      - {scenario: sinusoidal,  weight: 0.33, overrides: {duration_s: [20.0, 30.0]}}
+  - name: div_wind
+    roles: {train: 1.0}
+    n_groups: 12
+    domain: randomized
+    n_domains: 4
+    wind_regime: id_diverse
+    forces: truth_default
+    mix:
+      - {scenario: hover,       weight: 0.34}
+      - {scenario: translation, weight: 0.33}
+      - {scenario: accel_decel, weight: 0.33}
+  - name: div_env
+    roles: {train: 1.0}
+    n_groups: 4
+    domain: randomized_env
+    n_domains: 4
+    wind_regime: id
+    forces: truth_default
+    mix:
+      - {scenario: hover,       weight: 0.5}
+      - {scenario: translation, weight: 0.5}
+  - name: div_gain
+    roles: {train: 1.0}
+    n_groups: 6
+    domain: randomized
+    n_domains: 3
+    wind_regime: id
+    forces: truth_default
+    controller_randomisation: {position_gain_scale: [0.7, 1.3], velocity_gain_scale: [0.7, 1.3], attitude_hold_scale: [0.7, 1.3]}
+    mix:
+      - {scenario: translation,   weight: 0.34}
+      - {scenario: accel_decel,   weight: 0.33}
+      - {scenario: pitch_doublet, weight: 0.33}

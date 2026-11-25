@@ -55,7 +55,8 @@ class AeroForceSystem:
     def from_config(cls, cfg: Mapping[str, Any], drone: DroneParams, nominal: DroneParams,
                     factors: Mapping[str, float] | None = None) -> "AeroForceSystem":
         factors = dict(factors or {})
-        rho = float(cfg.get("air_density", 1.225))
+        rho_scale = float(factors.get("air_density_scale", 1.0))   # domain factor: air density relative to the config value
+        rho = float(cfg.get("air_density", 1.225)) * rho_scale
         R = float(cfg.get("rotor_radius_m", 0.10))
         rd = cfg.get("rotor_drag") or {}
         bd = cfg.get("body_drag") or {}
@@ -68,7 +69,8 @@ class AeroForceSystem:
             else:
                 # mass-normalised coefficient d [1/s] at nominal hover:  k_rd = d m₀ / ΣΩ_hover,₀
                 k_rd = float(rd["d_hover_per_s"]) * nominal.mass / float(nominal.hover_rotor_speed.sum())
-            rotor = M.RotorDragParams(k_rd=k_rd, scale=float(factors.get("rotor_drag_scale", 1.0)))
+            # the rotor-drag coefficient is proportional to the air density, like the body drag
+            rotor = M.RotorDragParams(k_rd=k_rd, scale=float(factors.get("rotor_drag_scale", 1.0)) * rho_scale)
         body = None
         if bd.get("enabled", False):
             cd = bd["cd"]

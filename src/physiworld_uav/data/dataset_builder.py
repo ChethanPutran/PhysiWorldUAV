@@ -35,8 +35,25 @@ ACTION_KEYS = {
     "rotor_cmd": ("actions/rotor_cmd", "held"),
     "rotor_speed_cmd": ("actions/rotor_speed_cmd", "held"),
 }
-AUX_FIELDS = ("environment/wind_W", "environment/wind_applied_W",
+AUX_FIELDS = ("environment/wind_W", "environment/wind_applied_W", "environment/wind_rotor_W",
               "ground_truth/wrench/external_force_W", "ground_truth/wrench/external_torque_B")
+
+
+def dataset_sim(dataset_dir) -> dict:
+    """``{"control_decimation": int, "model_dt": float}`` of a dataset, from the first row of its manifest (the plan fixes them for every
+    episode). A dataset or test fixture without a manifest gets the 50 Hz defaults (decimation 4, 0.02 s)."""
+    import json
+    from pathlib import Path
+    try:
+        with (Path(dataset_dir) / "manifest.jsonl").open() as f:
+            sim = json.loads(f.readline())["sim"]
+        return {"control_decimation": int(sim["control_decimation"]), "model_dt": float(sim["model_dt"])}
+    except (OSError, KeyError, ValueError, TypeError):
+        return {"control_decimation": 4, "model_dt": 0.02}
+
+
+def dataset_decimation(dataset_dir) -> int:
+    return dataset_sim(dataset_dir)["control_decimation"]
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,19 @@ def to_model_episode(arrays: Mapping[str, np.ndarray], meta: EpisodeMetadata,
     return ModelEpisode(episode_id=meta.episode_id, meta=meta, t=t, states=states,
                         obs=obs.astype(np.float32), actions=act.astype(np.float32),
                         dt=float(t[1] - t[0]), aux=aux)
+
+
+def imu_transport_status(episodes: Sequence) -> str:
+    """"corrected" | "raw" | "mixed" | "unknown": was the Isaac IMU transport artefact (−ω×v) removed at generation?
+    Datasets from v0.6.0 on are corrected; the Run 5 pilot v0.5.0 holds the raw sensor (manifest rows have no flag)."""
+    flags = {bool((e.meta.sim or {}).get("imu_transport_correction", False)) for e in episodes if getattr(e, "meta", None) is not None}
+    if not flags:
+        return "unknown"
+    return "corrected" if flags == {True} else ("raw" if flags == {False} else "mixed")
+
+
+IMU_RAW_WARNING = ("this dataset holds the RAW Isaac IMU (accelerometer = specific force − ω×v): the synthetic IMU φ of the latent models "
+                   "produces the true specific force and will not match it. Use a dataset generated with physics.imu_transport_correction=true (v0.6.0+).")
 
 
 def _eligible(meta: EpisodeMetadata, cfg: BuilderConfig, roles: Sequence[str] | None) -> bool:

@@ -2,7 +2,7 @@
 # Run 3 exit criterion: new schema + complete metadata from a real Isaac run.
 name: smoke
 dataset_id: smoke
-dataset_version: 0.3.0
+dataset_version: 0.4.0
 seed: 7
 parts:
   - name: smk

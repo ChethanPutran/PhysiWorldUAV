@@ -28,7 +28,8 @@ THRESHOLDS = dict(
     pos_xy_abs_m=60.0, z_min_m=0.0, z_max_m=10.0, speed_mps=20.0, omega_radps=10.0, rotor_speed_radps=(0.0, 838.0),
     tilt_deg=85.0, specific_force_ms2=4 * G,
     kin_pos_vel_mps_p99=0.10,          # |Δp/dt − (v_k+v_{k+1})/2|
-    kin_acc_imu_ms2_p99=1.0,           # |Δv/dt − (R f + g)| (contact-free episodes)
+    kin_acc_imu_ms2_p99=1.0,           # |Δv/dt − (R f + g)| (contact-free episodes); datasets with the raw Isaac IMU (v0.5.0)
+    kin_acc_imu_corrected_ms2_p99=0.25,  # same, for datasets generated with physics.imu_transport_correction (v0.6.0 pilot: 0.051)
     kin_force_balance_ms2_p99=0.5,     # ground-truth Newton balance (independent of the IMU)
     kin_gyro_radps_p99=0.05,           # |IMU gyro − ω_B| (clean sensor)
     att_rate_rad_p99=0.02,             # |angle(q_k, q_{k+1}) − |ω| dt|
@@ -76,6 +77,39 @@ def check_range(episodes: Sequence, limits: Mapping = THRESHOLDS) -> tuple[list[
     finite = all(np.isfinite(x).all() for x in (S, O, A))
     out.append(finding("pass" if finite else "fail", "range.finite", "all values finite" if finite else "non-finite values present"))
     return out, stats
+
+
+# ------------------------------------------------------------------ outlier episodes
+def _episode_channels(e) -> dict[str, np.ndarray]:
+    tilt = np.degrees(np.arccos(np.clip(1 - 2 * (e.states[:, 7] ** 2 + e.states[:, 8] ** 2), -1, 1)))
+    return {"speed [m/s]": np.linalg.norm(e.states[:, 3:6], axis=1), "tilt [deg]": tilt, "‖ω‖ [rad/s]": np.linalg.norm(e.states[:, 10:13], axis=1),
+            "IMU |f| [m/s²]": np.linalg.norm(e.obs[:, :3], axis=1), "rotor max [rad/s]": e.actions.max(1)}
+
+
+def episode_outliers(episodes: Sequence, k_mad: float = 5.0, top: int = 3) -> dict:
+    """Per channel, the per-episode p99 and the episodes whose p99 lies more than ``k_mad`` robust deviations (MAD·1.4826) above
+    the median of all episodes. Detects single odd episodes that the pooled percentiles hide."""
+    ids = [e.episode_id for e in episodes]
+    per = {name: np.array([np.percentile(_episode_channels(e)[name], 99) for e in episodes]) for name in _episode_channels(episodes[0])}
+    out = {}
+    for name, v in per.items():
+        med = float(np.median(v)); mad = float(np.median(np.abs(v - med)) * 1.4826) or 1e-12
+        z = (v - med) / mad
+        order = np.argsort(-z)
+        out[name] = {"median_p99": med, "robust_sd": mad, "p99_by_episode": {i: float(x) for i, x in zip(ids, v)},
+                     "outliers": [{"episode": ids[j], "p99": float(v[j]), "robust_z": float(z[j])} for j in order if z[j] > k_mad],
+                     "top": [{"episode": ids[j], "p99": float(v[j]), "robust_z": float(z[j])} for j in order[:top]]}
+    return out
+
+
+def check_outliers(episodes: Sequence, k_mad: float = 5.0) -> tuple[list[dict], dict]:
+    res = episode_outliers(episodes, k_mad)
+    flagged = {n: [o["episode"] for o in v["outliers"]] for n, v in res.items() if v["outliers"]}
+    if not flagged:
+        return [finding("pass", "outliers.episodes", f"no episode has a per-channel p99 more than {k_mad:g} robust deviations above the median")], res
+    # info, not warn: a robust-z outlier is a candidate to look at (e.g. an aggressive scenario), not an error by itself
+    return [finding("info", "outliers.episodes", "episodes with an unusual per-episode p99 (> %g robust deviations above the median): %s" % (
+        k_mad, "; ".join(f"{n}: {', '.join(v[:4])}{' …' if len(v) > 4 else ''} ({len(v)})" for n, v in flagged.items())))], res
 
 
 # ------------------------------------------------------------------ duplicates
@@ -157,7 +191,11 @@ def force_balance_residual_raw(arrays: Mapping[str, np.ndarray], mass: float, dt
 
 def check_physical(episodes: Sequence, statuses: Mapping[str, str] | None = None, limits: Mapping = THRESHOLDS,
                    acc_raw: Mapping[str, np.ndarray] | None = None,
-                   balance_raw: Mapping[str, np.ndarray] | None = None) -> tuple[list[dict], dict]:
+                   balance_raw: Mapping[str, np.ndarray] | None = None, imu_corrected: bool = False) -> tuple[list[dict], dict]:
+    """``imu_corrected``: the dataset was generated with the IMU transport correction, so the tight IMU limit applies."""
+    limits = dict(limits)
+    if imu_corrected:
+        limits["kin_acc_imu_ms2_p99"] = limits["kin_acc_imu_corrected_ms2_p99"]
     acc: dict[str, list[np.ndarray]] = defaultdict(list)
     for e in episodes:
         r = physical_residuals(e)
@@ -178,8 +216,9 @@ def check_physical(episodes: Sequence, statuses: Mapping[str, str] | None = None
         v = summ[key]["p99"]
         out.append(finding("pass" if v <= limits[thr_key] else "warn", f"physical.{key}",
                            f"{text}: p50 {summ[key]['p50']:.4g}, p99 {v:.4g}, max {summ[key]['max']:.4g} {unit} (limit p99 {limits[thr_key]})"
-                           + (" — see docs/audit/run5_report.md addendum: in the pilot the tail occurs in high-angular-rate phases and tracks ‖ω‖ (ρ≈0.6), "
-                              "while the ground-truth force balance holds; consistent with an IMU lever arm, not verified" if key == "acc_imu" and v > limits[thr_key] else "")))
+                           + (" — the Isaac IMU reports specific force − ω_B×v_B (R² 0.83 on the Run 5 pilot; the tail tracks ‖ω‖ and the ground-truth force balance holds); "
+                              "datasets from v0.6.0 on are generated with physics.imu_transport_correction=true" if key == "acc_imu" and v > limits[thr_key] and not imu_corrected else "")
+                           + (" [IMU transport correction applied at generation: tight limit]" if key == "acc_imu" and imu_corrected else "")))
     if balance_raw:
         b = np.concatenate([v for k, v in balance_raw.items() if (statuses or {}).get(k, "completed") == "completed"])
         summ["force_balance"] = dict(p50=_f(np.percentile(b, 50)), p99=_f(np.percentile(b, 99)), max=_f(b.max()))
@@ -197,6 +236,22 @@ def corr(a: np.ndarray, b: np.ndarray) -> float:
     if a.std() < 1e-12 or b.std() < 1e-12:
         return 0.0
     return float(np.corrcoef(a, b)[0, 1])
+
+
+def _pooled_action_wind(eps_u: Sequence, eps_w: Sequence) -> float:
+    n = [min(len(u.actions), len(w.aux["environment/wind_applied_W"])) for u, w in zip(eps_u, eps_w)]
+    U = np.concatenate([u.actions[:k] for u, k in zip(eps_u, n)]); W = np.concatenate([w.aux["environment/wind_applied_W"][:k] for w, k in zip(eps_w, n)])
+    return float(np.abs(np.array([[corr(U[:, i], W[:, j]) for j in range(3)] for i in range(4)])).max())
+
+
+def action_wind_permutation_p(eps: Sequence, n_perm: int = 1000, seed: int = 0) -> tuple[float, float, float]:
+    """(observed max |ρ|, null 95th percentile, p-value) with the wind series shuffled between episodes: how often chance alone
+    gives a pooled correlation at least as large with this few episodes. A fixed limit ignores the sample size."""
+    eps = sorted(eps, key=lambda e: e.episode_id)          # independent of how the shards list the episodes (parallel workers reorder them)
+    obs = _pooled_action_wind(eps, eps)
+    rng = np.random.default_rng(seed)
+    null = np.array([_pooled_action_wind(eps, [eps[i] for i in rng.permutation(len(eps))]) for _ in range(n_perm)])
+    return obs, float(np.percentile(null, 95)), float((null >= obs).mean())
 
 
 def check_correlation(episodes: Sequence, rows: Mapping[str, dict], physics=None, limits: Mapping = THRESHOLDS) -> tuple[list[dict], dict]:
@@ -218,9 +273,14 @@ def check_correlation(episodes: Sequence, rows: Mapping[str, dict], physics=None
         res["action_wind"][dtype] = dict(matrix=C.round(3).tolist(), max_abs=_f(np.abs(C).max()), within_episode_max_abs=_f(np.abs(Cd).max()),
                                          thrust_vs_speed=_f(c_thr), n_episodes=len(eps), n_samples=int(n))
         worst = max(np.abs(C).max(), abs(c_thr))
+        perm = ""
+        if len(eps) >= 6:
+            o_, p95_, p_ = action_wind_permutation_p(eps)
+            res["action_wind"][dtype].update(permutation_null_p95=p95_, permutation_p=p_)
+            perm = f"; with the wind shuffled between episodes chance gives up to {p95_:.2f} (95th percentile), permutation p = {p_:.3f}"
         out.append(finding("pass" if worst <= limits["corr_action_wind"] else "warn", f"correlation.action_wind.{dtype}",
                            f"max |ρ(rotor speed, wind)| = {np.abs(C).max():.2f}, within-episode {np.abs(Cd).max():.2f}, ρ(thrust, |wind|) = {c_thr:.2f} "
-                           f"over {len(eps)} episodes (limit {limits['corr_action_wind']}; the action must not encode the wind)"))
+                           f"over {len(eps)} episodes (limit {limits['corr_action_wind']}; the action must not encode the wind){perm}"))
     # domain factors across distinct ID domains (the OOD shells are sampled differently and are not mixed in)
     doms: dict[str, dict] = {}
     for r in rows.values():
@@ -465,15 +525,17 @@ def run_all(dataset_dir: str | Path, with_physics: bool = True) -> dict:
         physics = QuadrotorPhysics.from_yaml()
     findings: list[dict] = []; metrics: dict = {}
     from physiworld_uav.data.writer import read_episode
-    acc_raw, balance_raw = {}, {}
+    acc_raw, balance_raw, imu_flags = {}, {}, []
     for row in index["episodes"]:
         if row.get("status") == "completed":
             arrays, meta = read_episode(dataset_dir / row["shard"], row["episode_id"])
+            imu_flags.append(bool((meta.sim or {}).get("imu_transport_correction", False)))
             dt_p = float(meta.sim.get("physics_dt", 0.005))
             acc_raw[row["episode_id"]] = acc_imu_residual_raw(arrays, dt_p)
             balance_raw[row["episode_id"]] = force_balance_residual_raw(arrays, float(meta.drone["mass_kg"]), dt_p)
-    for name, fn in (("range", lambda: check_range(episodes)), ("duplicates", lambda: (check_duplicates(episodes, rows_w), {})),
-                     ("physical", lambda: check_physical(episodes, status, acc_raw=acc_raw, balance_raw=balance_raw)), ("correlation", lambda: check_correlation(episodes, rows_w, physics)),
+    for name, fn in (("range", lambda: check_range(episodes)), ("duplicates", lambda: (check_duplicates(episodes, rows_w), {})), ("outliers", lambda: check_outliers(episodes)),
+                     ("physical", lambda: check_physical(episodes, status, acc_raw=acc_raw, balance_raw=balance_raw,
+                                                         imu_corrected=bool(imu_flags) and all(imu_flags))), ("correlation", lambda: check_correlation(episodes, rows_w, physics)),
                      ("distribution", lambda: check_distribution(rows_w, domain_cfg, cfg.get("experiment") or cfg)),
                      ("coverage", lambda: check_coverage(rows_w, episodes, domain_cfg))):
         f, m = fn(); findings += f; metrics[name] = m

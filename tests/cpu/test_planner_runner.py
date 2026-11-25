@@ -278,3 +278,187 @@ def test_checkpoint_index_is_atomic_and_marks_in_progress(tmp_path, pilot):
     idx = json.loads((tmp_path / "index.json").read_text())
     assert idx["in_progress"] is True and idx["complete"] is False and idx["validation"]["ok"] is None
     assert not (tmp_path / "index.json.tmp").exists()
+
+
+# -- parallel generation: worker assignment, shard isolation, merge ----------------------------
+from physiworld_uav.experiments import generate as G
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 7])
+def test_worker_assignment_partitions_rows_keeps_groups_together_and_balances(pilot, n):
+    cfg, m = pilot
+    rows = m.episodes
+    owner = G.assign_workers(rows, n)
+    assert owner == G.assign_workers(rows, n)                                    # deterministic
+    parts = [G.worker_rows(rows, w, n) for w in range(n)]
+    ids = [r["episode_id"] for p in parts for r in p]
+    assert sorted(ids) == sorted(r["episode_id"] for r in rows) and len(ids) == len(set(ids))   # exact partition
+    by_group: dict[str, set[int]] = defaultdict(set)
+    for w, p in enumerate(parts):
+        for r in p:
+            by_group[r["group_id"]].add(w)
+    assert all(len(ws) == 1 for ws in by_group.values())                         # a counterfactual group never splits
+    where = {r["episode_id"]: w for w, p in enumerate(parts) for r in p}
+    assert all(where[r["replay_of"]] == where[r["episode_id"]] for r in rows if r.get("replay_of"))   # Mode B reads its baseline
+    cost = [sum(r["n_steps"] for r in p) for p in parts]
+    biggest_group = max(sum(r["n_steps"] for r in rows if r["group_id"] == g) for g in by_group)
+    assert max(cost) - min(cost) <= biggest_group                                # LPT bound
+    if n > 1:
+        assert min(len(p) for p in parts) > 0
+
+
+def test_worker_shard_names_and_scan_isolation(tmp_path):
+    import h5py
+    assert G.shard_prefix(None) == "shard_" and G.shard_prefix((0, 1)) == "shard_" and G.shard_prefix((3, 8)) == "shard_w03_"
+    for name in ("shard_w00_000.h5", "shard_w01_000.h5"):
+        with h5py.File(tmp_path / name, "w") as f:
+            f.require_group("episodes").require_group("half_written")            # no metadata attribute: an interrupted write
+    rows, _ = G._scan_shards(tmp_path, {}, "shard_w00_")                         # worker 0 cleans only its own file
+    assert rows == []
+    with h5py.File(tmp_path / "shard_w00_000.h5") as f0, h5py.File(tmp_path / "shard_w01_000.h5") as f1:
+        assert "half_written" not in f0["episodes"] and "half_written" in f1["episodes"]
+    G._scan_shards(tmp_path, {})                                                 # a merge sees every worker's shards
+    with h5py.File(tmp_path / "shard_w01_000.h5") as f1:
+        assert "half_written" not in f1["episodes"]
+
+
+class _ClosableMock(MockSim):
+    def close(self):
+        pass
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_sharded_run_and_merge_equal_the_single_process_dataset(tmp_path, monkeypatch):
+    def overrides(tag):
+        return ["experiment=smoke", "experiment.parts.0.n_groups=4", f"experiment.dataset_version={tag}",
+                f"dataset.output_root={tmp_path}"]
+
+    def fake_make_sim(phys, first):
+        return _ClosableMock(DroneParams.from_dict(to_plain(compose(["experiment=smoke"]))["drone"]), phys["dt"])
+
+    monkeypatch.setattr(G, "_make_sim", fake_make_sim)
+    monkeypatch.setattr(G, "_sim_settings", lambda sim: {})
+    cfg_par = compose(overrides("par"))
+    out = G.dataset_dir(to_plain(cfg_par))
+    for w in (1, 0):                                                              # order of the workers does not matter
+        G.run(cfg_par, shard=(w, 2))
+    assert not (out / "index.json").exists()                                     # workers never write the final index
+    assert (out / "index.worker00.json").exists() and (out / "index.worker01.json").exists()
+    assert sorted(p.name for p in out.glob("shard_*.h5")) == ["shard_w00_000.h5", "shard_w01_000.h5"]
+    G.merge(cfg_par)
+    idx = json.loads((out / "index.json").read_text())
+    assert idx["n_written"] == idx["n_planned"] == 4 and idx["validation"]["ok"] and idx["complete"]
+    assert len({r["episode_id"] for r in idx["episodes"]}) == 4
+    # one process, no shards: identical episodes (the worker split never changes an episode)
+    cfg_one = compose(overrides("one"))
+    G.run(cfg_one)
+    one = G.dataset_dir(to_plain(cfg_one))
+    from physiworld_uav.data.writer import read_episode
+    rows_one = {r["episode_id"]: r["shard"] for r in json.loads((one / "index.json").read_text())["episodes"]}
+    for r in idx["episodes"]:
+        a, _ = read_episode(out / r["shard"], r["episode_id"]); b, _ = read_episode(one / rows_one[r["episode_id"]], r["episode_id"])
+        assert np.array_equal(a["actions/rotor_cmd"], b["actions/rotor_cmd"])
+        assert np.array_equal(a["ground_truth/position_W"], b["ground_truth/position_W"])
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_worker_resume_and_merge_refuses_in_progress_workers(tmp_path, monkeypatch):
+    monkeypatch.setattr(G, "_make_sim", lambda phys, first: _ClosableMock(
+        DroneParams.from_dict(to_plain(compose(["experiment=smoke"]))["drone"]), phys["dt"]))
+    monkeypatch.setattr(G, "_sim_settings", lambda sim: {})
+    cfg = compose(["experiment=smoke", "experiment.parts.0.n_groups=4", "experiment.dataset_version=res",
+                   f"dataset.output_root={tmp_path}"])
+    out = G.dataset_dir(to_plain(cfg))
+    G.run(cfg, shard=(0, 2), limit=1)                                             # "crash" after one episode
+    w0 = json.loads((out / "index.worker00.json").read_text())
+    assert w0["n_written"] == 1 and w0["n_assigned"] == 2 and not w0["in_progress"]
+    with pytest.raises(SystemExit):                                               # a second start without --resume is refused
+        G.run(cfg, shard=(0, 2))
+    G.run(cfg, shard=(0, 2), resume=True)
+    assert json.loads((out / "index.worker00.json").read_text())["n_written"] == 2
+    G.run(cfg, shard=(1, 2))
+    (out / "index.worker01.json").write_text(json.dumps({**json.loads((out / "index.worker01.json").read_text()), "in_progress": True}))
+    with pytest.raises(SystemExit, match="in_progress"):
+        G.merge(cfg)
+    G.merge(cfg, force=True)
+    assert json.loads((out / "index.json").read_text())["n_written"] == 4
+
+
+# -- IMU transport correction in the runner ----------------------------------------------------------
+class _ArtefactMock(MockSim):
+    """Mock whose IMU reports specific force minus ω_B × v_B (the Isaac artefact), flying with a constant velocity and rotation rate
+    (attitude frozen at the episode's initial yaw: body axes differ from world axes)."""
+
+    def __init__(self, drone, dt, artefact: bool):
+        super().__init__(drone, dt)
+        self.artefact = artefact
+
+    def reset_episode(self, position, quat_wxyz, velocity_W, angular_velocity_W, throttle):
+        super().reset_episode(position, quat_wxyz, [2.0, 0.0, 0.0], [0.0, 0.4, 0.0], throttle)
+
+    def read_imu(self):
+        acc, gyro, ok = super().read_imu()
+        if self.artefact:                 # body-frame transport term, computed here from the quaternion (independent of the code under test)
+            w, x, y, z = (float(c) for c in self.q)
+            R = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                          [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                          [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])      # body -> world
+            acc = acc - np.cross(R.T @ self.w.numpy(), R.T @ self.v.numpy())
+        return acc, gyro, ok
+
+    def close(self):
+        pass
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_runner_removes_the_imu_transport_artefact_when_configured():
+    cfg = to_plain(compose(["experiment=smoke"]))
+    row = plan_dataset(cfg).episodes[0]
+    assert row["sim"]["imu_transport_correction"] is True                         # default of config/physics for new datasets
+    nominal = DroneParams.from_dict(cfg["drone"])
+
+    def run(artefact, corrected):
+        r = copy.deepcopy(row); r["sim"]["imu_transport_correction"] = corrected
+        sim = _ArtefactMock(nominal, cfg["physics"]["dt"], artefact)
+        return run_episode(sim, r, nominal, termination=Termination(), config_hash="h", dataset_version="0", enforce_guards=False)
+
+    clean, m_clean = run(artefact=False, corrected=False)                           # an ideal sensor
+    raw, m_raw = run(artefact=True, corrected=False)                                # Isaac as in the pilot
+    fixed, m_fix = run(artefact=True, corrected=True)                               # Isaac + the correction
+    a_c, a_r, a_f = (x["observations/imu_accel_B"][1:] for x in (clean, raw, fixed))
+    assert np.abs(a_r - a_c).max() > 0.5                                            # the artefact is visible (|ω×v| = 0.8 m/s²)
+    assert np.allclose(a_f, a_c, atol=1e-4)                                         # the correction restores the specific force
+    assert m_fix.stats["imu_transport_corrected"] is True and m_raw.stats["imu_transport_corrected"] is False
+    for k in ("ground_truth/position_W", "ground_truth/velocity_W", "actions/rotor_cmd"):
+        assert np.array_equal(clean[k], fixed[k])                                   # only the logged accelerometer changes
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_first_imu_sample_is_the_analytic_rest_value_not_the_sensor_read():
+    """The t = 0 IMU sample depends on no simulator history: R(q0)ᵀ(0, 0, g) with zero gyro, whatever the sensor reports."""
+    from physiworld_uav.drones.params import G
+    from physiworld_uav.experiments.runner import _quat_from_yaw
+    import math
+    cfg = to_plain(compose(["experiment=smoke"]))
+    row = plan_dataset(cfg).episodes[0]
+    nominal = DroneParams.from_dict(cfg["drone"])
+
+    class Junk(MockSim):
+        first = True
+        def read_imu(self):
+            if Junk.first:                      # the settle-step read: pretend it carries leftover state
+                Junk.first = False
+                return np.array([4.6e-3, -1.3e-3, 9.8]), np.array([0.1, 0.2, 0.3]), True
+            return super().read_imu()
+        def close(self): pass
+
+    Junk.first = True
+    arrays, meta = run_episode(Junk(nominal, cfg["physics"]["dt"]), row, nominal, termination=Termination(), config_hash="h",
+                               dataset_version="0", enforce_guards=False)
+    q = _quat_from_yaw(math.radians(row["initial_conditions"]["yaw_deg"]))
+    w, x, y, z = q
+    R = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                  [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                  [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+    assert np.allclose(arrays["observations/imu_accel_B"][0], R.T @ np.array([0, 0, G]), atol=1e-5)
+    assert np.allclose(arrays["observations/imu_gyro_B"][0], 0.0) and bool(arrays["observations/imu_valid"][0])

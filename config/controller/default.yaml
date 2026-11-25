@@ -2,6 +2,9 @@
 policy: "true"               # build controllers from the TRUE domain parameters ("nominal" for ablation)
 position:
   gains: null                # null → OmniDrones cfg/lee_controller_hummingbird.yaml
+  nominal_gains:             # the same values, needed to scale them (part key `controller_randomisation`); OmniDrones lee_controller_hummingbird.yaml
+    position_gain: [4.0, 4.0, 4.0]
+    velocity_gain: [2.2, 2.2, 2.2]
 attitude:
   attitude_hold:             # slow yaw-aware hold for attitude manoeuvres (plan T6)
     kp_xy: 0.8

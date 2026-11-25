@@ -61,3 +61,25 @@ def test_imu_fallback_specific_force_and_body_gyro():
     acc, gyr = compute_imu_from_state(s, np.zeros(3), 0.005)
     assert np.allclose(acc, [0, 0, 9.81])                       # at rest: +g on body z
     assert np.allclose(gyr, quat_rotate_inverse_np(q, w_W))
+
+
+# -- IMU transport correction (2026-11-24) --------------------------------------------------------------------
+def test_imu_transport_correction_restores_the_specific_force():
+    import torch
+    from physiworld_uav.core.state_extractor import (ANGVEL, POS, QUAT, VEL, angular_velocity_body_torch,
+                                                     imu_transport_correction_torch, quat_rotate_inverse_torch)
+    rng = np.random.default_rng(0)
+    n = 6
+    q = torch.tensor(rng.normal(size=(n, 4)), dtype=torch.float64)
+    q = q / q.norm(dim=-1, keepdim=True)
+    s = torch.zeros(n, 13, dtype=torch.float64)
+    s[:, QUAT], s[:, VEL] = q, torch.tensor(rng.normal(0, 3, (n, 3)))
+    s[:, ANGVEL] = torch.tensor(rng.normal(0, 1, (n, 3)))
+    f_true = torch.tensor(rng.normal(0, 5, (n, 3)))
+    w_B, v_B = angular_velocity_body_torch(s), quat_rotate_inverse_torch(s[:, QUAT], s[:, VEL])
+    raw = f_true - torch.cross(w_B, v_B, dim=-1)                                  # what the Isaac sensor reports
+    assert not torch.allclose(raw, f_true, atol=1e-3)
+    assert torch.allclose(imu_transport_correction_torch(raw, s), f_true, atol=1e-12)
+    zero = s.clone(); zero[:, VEL] = 0
+    assert torch.equal(imu_transport_correction_torch(raw, zero), raw)             # at rest (v = 0) nothing changes
+    assert imu_transport_correction_torch(raw[0], s[0]).shape == (3,)

@@ -1,0 +1,20 @@
+# Pilot v7 in-distribution wind (2026-11-25): realised peak |w| <= 6.2 m/s (so ID wind lies in [0, 6.2]), episode mean 0-5.2 m/s, |w_z| <= 1 m/s,
+# the slow temporal structure of `id`. Stratified mean speed: 5 equal bands of 1.04 m/s, groups of each split role spread over them, weighted
+# towards the upper bands because the counterfactual siblings (wind x 0 and x 0.5) add mass at low speed (expected share of ID episodes per
+# band about 27/17/19/19/19 %). Gust/step/OU additions are at most about 1 m/s, so a mean of 5.2 keeps the peak <= 6.2 (rejection sampling
+# enforces the limit on every realisation).
+name: id_v7
+category: id
+mean_speed: [0.0, 5.2]
+speed_strata: 5
+speed_strata_weights: [0.5, 1, 2, 3, 3]
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: steady, weight: 0.25}
+  - {type: cosine_gust, weight: 0.15, params: {peak_mps: [0.3, 1.0], rise_time_s: [0.5, 1.5], onset_fraction: [0.15, 0.7]}}
+  - {type: step, weight: 0.15, params: {delta_mps: [-1.0, 1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.7]}}
+  - {type: sinusoid, weight: 0.15, params: {amplitude_mps: [0.2, 0.8], frequency_hz: [0.05, 0.3]}}
+  - {type: ou, weight: 0.2, params: {sigma_mps: [0.1, 0.4], tau_s: [2.0, 5.0]}}
+  - {type: random_gusts, weight: 0.1, params: {rate_hz: [0.05, 0.15], peak_range_mps: [0.3, 0.8], rise_range_s: [0.5, 1.2]}}
+limits: {peak_speed_max: 6.2, vertical_max: 1.0, mean_horizontal: [0.0, 6.2]}

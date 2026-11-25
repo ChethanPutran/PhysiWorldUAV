@@ -67,4 +67,7 @@ class ImuNoise:
         bias = torch.randn(obs.shape[-1], generator=g, dtype=obs.dtype) * sig_b
         out = dict(sample)
         out["obs_history"] = obs + white + bias
+        if "future_obs" in sample:        # re-observation analyses: same bias (constant within the window), fresh white noise
+            fo = sample["future_obs"]
+            out["future_obs"] = fo + torch.randn(fo.shape, generator=g, dtype=fo.dtype) * sig_w + bias
         return out

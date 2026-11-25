@@ -35,7 +35,7 @@ from physiworld_uav.randomization.domain_generator import generate_domains
 from physiworld_uav.randomization.parameter_sampler import DomainSamplerConfig, Domain
 from physiworld_uav.trajectories.feasibility import FeasibilityLimits, check
 from physiworld_uav.trajectories.library import ATTITUDE_FAMILIES, Anchor, _draw, make_reference
-from physiworld_uav.wind.regimes import WindRegime, sample_wind
+from physiworld_uav.wind.regimes import WindRegime, assign_strata, sample_wind
 
 from .counterfactual import build_siblings
 
@@ -71,6 +71,32 @@ def _role_of(part: Mapping[str, Any]) -> list[tuple[str, float]]:
 
 def _ood_category(role: str) -> str | None:
     return role.split("_ood_", 1)[1] if "_ood_" in role else None
+
+
+def _apply_controller_randomisation(ctrl: dict[str, Any], rand: Mapping[str, Any], ctrl_cfg: Mapping[str, Any],
+                                    rng: np.random.Generator) -> None:
+    """Scale the controller gains of one group by random factors (part key ``controller_randomisation``).
+
+    Position mode: ``position_gain`` and ``velocity_gain`` (Lee controller) are the nominal gains times a scale each. Attitude mode: the
+    slow position-hold gains ``kp_*`` / ``kd_*`` times ``attitude_hold_scale``. Rate / open-loop / replay modes have nothing to scale.
+    The sampled gains are written into the row (``controller.gains`` / ``attitude_hold``) so the episode is reproducible from its row."""
+    mode = ctrl["mode"]
+    scales: dict[str, float] = {}
+    if mode == "position":
+        nominal = (ctrl_cfg.get("position") or {}).get("nominal_gains")
+        if not nominal:
+            raise PlanError("controller_randomisation needs controller.position.nominal_gains in config/controller/default.yaml")
+        s_p = float(_draw(rand.get("position_gain_scale", 1.0), rng))
+        s_v = float(_draw(rand.get("velocity_gain_scale", 1.0), rng))
+        ctrl["gains"] = {"position_gain": [float(x) * s_p for x in nominal["position_gain"]],
+                         "velocity_gain": [float(x) * s_v for x in nominal["velocity_gain"]]}
+        scales = {"position_gain_scale": s_p, "velocity_gain_scale": s_v}
+    elif mode == "attitude" and ctrl.get("attitude_hold"):
+        s = float(_draw(rand.get("attitude_hold_scale", 1.0), rng))
+        ctrl["attitude_hold"] = {k: (float(v) * s if k in ("kp_xy", "kd_xy", "kp_z", "kd_z") else v)
+                                 for k, v in dict(ctrl["attitude_hold"]).items()}
+        scales = {"attitude_hold_scale": s}
+    ctrl["randomisation"] = scales
 
 
 def _sample_ic(tmpl: Mapping[str, Any], rng: np.random.Generator) -> dict[str, Any]:
@@ -174,6 +200,15 @@ def plan_dataset(cfg: Mapping[str, Any]) -> Manifest:
         # deterministic interleaving of entries and roles across groups
         order = pnode.child("assignment").rng().permutation(n_groups)
         role_of_group = [r for (r, _), c in zip(roles, group_counts) for _ in range(c)]
+        # stratified mean wind speed (regime key ``speed_strata`` = K > 0): within each split role the groups are spread evenly over K
+        # equal-width speed bands (a role with 6 groups and K = 5 has one group in five bands and two in one)
+        speed_band: dict[int, tuple[int, tuple[float, float]]] = {}
+        if regime.speed_strata > 0:
+            bands = regime.speed_bands()
+            for r, _ in roles:
+                gs = [g for g, rr in enumerate(role_of_group) if rr == r]
+                for g, b in zip(gs, assign_strata(len(gs), regime.speed_strata, pnode.child("wind_strata").child(f"role:{r}").rng(), regime.speed_strata_weights)):
+                    speed_band[g] = (b, bands[b])
 
         cf_tmpl = None
         if part.get("counterfactual"):
@@ -230,7 +265,7 @@ def plan_dataset(cfg: Mapping[str, Any]) -> Manifest:
                                 f"{scen.get('max_resample', 20)} attempts; last: {feas.violations if feas else '-'}")
 
             wind = sample_wind(regime, gnode.child("wind").rng(), duration=duration, dt=dt,
-                               profile=entry.get("wind_profile"))
+                               profile=entry.get("wind_profile"), speed_range=speed_band[g][1] if g in speed_band else None)
             if data_type == "closed_loop":
                 controller_mode = "attitude" if scen["family"] in ATTITUDE_FAMILIES else "position"
             else:
@@ -244,7 +279,9 @@ def plan_dataset(cfg: Mapping[str, Any]) -> Manifest:
                 "experiment_group": entry.get("experiment_group"),
                 "split_role": role, "ood_category": _ood_category(role), "data_type": data_type,
                 "duration_s": duration, "n_steps": n_steps,
-                "sim": {"physics_dt": dt, "control_decimation": dec, "model_dt": model_dt},
+                "sim": {"physics_dt": dt, "control_decimation": dec, "model_dt": model_dt,
+                        "imu_transport_correction": bool(phys.get("imu_transport_correction", False)),
+                        "settle_steps": int(phys.get("settle_steps", 1))},
                 "domain": {**domain.to_dict(), "drone": drone.summary()},
                 "controller": {"mode": controller_mode,
                                "policy": str(ctrl_cfg.get("policy", "true")),
@@ -257,7 +294,9 @@ def plan_dataset(cfg: Mapping[str, Any]) -> Manifest:
                            "config": load_template("forces", str(part.get("forces", "none")))},
                 "initial_conditions": ic, "reference": reference, "open_loop": open_loop,
                 "feasibility": None if feas is None else feas.peaks,
-                "wind": {**wind.to_dict(), "limits": regime_cfg["limits"]},
+                "wind": {**wind.to_dict(), "limits": regime_cfg["limits"],
+                         **({"speed_stratum": {"index": speed_band[g][0], "of": regime.speed_strata, "range_mps": list(speed_band[g][1])}}
+                            if g in speed_band else {})},
                 "excitation": entry.get("excitation"),
                 "seeds": {"group": _seed_record(gnode),
                           "initial_conditions": _seed_record(anode.child("initial_conditions")),
@@ -267,6 +306,10 @@ def plan_dataset(cfg: Mapping[str, Any]) -> Manifest:
                           "domain": domain.seed_path},
                 "counterfactual": None, "replay_of": None,
             }
+
+            if part.get("controller_randomisation"):
+                _apply_controller_randomisation(base["controller"], part["controller_randomisation"], ctrl_cfg,
+                                                gnode.child("controller_gains").rng())
 
             use_cf = cf_tmpl is not None and (
                 cf_fraction >= 1.0 or gnode.child("cf_select").rng().random() < cf_fraction)
@@ -280,6 +323,8 @@ def plan_dataset(cfg: Mapping[str, Any]) -> Manifest:
             else:
                 sibs = [base]
             for i, s in enumerate(sibs):
+                if g in speed_band:                       # the siblings' wind dicts are rebuilt by the counterfactual builder: keep the stratum on every row
+                    s["wind"] = {**s["wind"], "speed_stratum": base["wind"]["speed_stratum"]}
                 s["episode_id"] = f"{group_id}_e{i}"
                 s["seeds"] = {**s["seeds"], "episode": seed_root.child(s["episode_id"]).seed}
             if use_cf and cf_tmpl.get("mode") == "fixed_action":

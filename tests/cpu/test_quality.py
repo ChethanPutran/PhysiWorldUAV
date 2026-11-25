@@ -170,3 +170,57 @@ def test_coverage_check_reports_sparse_roles_and_occupancy():
     assert res["domain_1d"]["mass"]["occupied_fraction"] >= 0.9
     assert any(x["check"] == "coverage.groups_per_role" and x["level"] == "warn" for x in f)
     assert "novelty_vs_train" in res and res["effective"]["episodes"] == 12
+
+
+# -- added 2026-11-24: outlier episodes and the permutation p-value of the action-wind correlation -----------------
+def test_outlier_check_flags_a_planted_episode_and_passes_homogeneous_data():
+    eps, _ = eps_and_rows(12)
+    f, res = sv.check_outliers(eps)
+    assert f[0]["level"] in ("pass", "info")                                       # synthetic episodes differ only by noise
+    homogeneous_flags = {n: [o["episode"] for o in v["outliers"]] for n, v in res.items()}
+    eps[5].states[:, 3] = 15.0                                                      # one aggressive episode: speed 15 m/s throughout
+    f, res = sv.check_outliers(eps)
+    assert f[0]["level"] == "info" and "speed" in f[0]["message"] and "e5" in f[0]["message"]
+    top = res["speed [m/s]"]["top"][0]
+    assert top["episode"] == "e5" and top["robust_z"] > 5
+    assert "e5" not in sum(homogeneous_flags.values(), [])
+
+
+def test_action_wind_permutation_p_is_small_for_a_planted_dependence_and_large_for_independence():
+    rng = np.random.default_rng(1)
+    eps, rows = eps_and_rows(10)
+    for e in eps:
+        e.aux["environment/wind_applied_W"] = rng.normal(0, 1, (len(e.actions), 3)).astype(np.float32)
+    obs, p95, p = sv.action_wind_permutation_p(eps, n_perm=100)
+    assert p > 0.05 and obs <= p95 + 0.2                                           # independent: not significant
+    for e in eps:
+        e.actions[:, 0] = 450 + 30 * e.aux["environment/wind_applied_W"][:, 0]     # the action encodes the wind
+    obs, p95, p = sv.action_wind_permutation_p(eps, n_perm=100)
+    assert obs > 0.9 and p < 0.02 and p95 < obs
+    f, res = sv.check_correlation(eps, rows)
+    msg = next(x for x in f if x["check"] == "correlation.action_wind.closed_loop")["message"]
+    assert "permutation p" in msg and "permutation_p" in res["action_wind"]["closed_loop"]
+
+
+def test_imu_limit_is_tighter_for_datasets_with_the_transport_correction():
+    eps, _ = eps_and_rows(4)
+    status = {e.episode_id: "completed" for e in eps}
+    raw = {e.episode_id: np.full(200, 0.4) for e in eps}                    # IMU residual 0.4 m/s² everywhere
+    f_old, _ = sv.check_physical(eps, status, acc_raw=raw)
+    f_new, _ = sv.check_physical(eps, status, acc_raw=raw, imu_corrected=True)
+    lvl = lambda f: next(x for x in f if x["check"] == "physical.acc_imu")        # noqa: E731
+    assert lvl(f_old)["level"] == "pass" and lvl(f_new)["level"] == "warn"        # 0.4 < 1.0 but > 0.25
+    assert "tight limit" in lvl(f_new)["message"] and "limit p99 0.25" in lvl(f_new)["message"]
+    raw_big = {e.episode_id: np.full(200, 1.7) for e in eps}
+    msg = lvl(sv.check_physical(eps, status, acc_raw=raw_big)[0])["message"]
+    assert "ω_B×v_B" in msg and "lever arm" not in msg                              # the explanation is the measured one
+
+
+def test_permutation_p_does_not_depend_on_the_episode_order():
+    rng = np.random.default_rng(2)
+    eps, _ = eps_and_rows(8)
+    for e in eps:
+        e.aux["environment/wind_applied_W"] = rng.normal(0, 1, (len(e.actions), 3)).astype(np.float32)
+    a = sv.action_wind_permutation_p(eps, n_perm=60)
+    b = sv.action_wind_permutation_p(list(reversed(eps)), n_perm=60)
+    assert a == b

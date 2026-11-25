@@ -14,6 +14,12 @@ Sample semantics at current model step t (H = history, P = horizon):
 Windows are cut lazily from contiguous episode arrays (no materialised
 copies). Auxiliary data (wind, injected wrench) is **not** part of the
 primary sample; ``AuxiliaryView`` exposes it for evaluation only.
+
+Exception (B6 only): ``ModelReadyDataset(..., oracle=True)`` adds ``oracle_force_W`` / ``oracle_torque_B`` (P, 3),
+the recorded **total injected aero wrench** acting during steps t … t+P−1 (decision: disturbance target = total wrench).
+It is off by default and is switched on only for the B6 oracle models, which are reference upper bounds.
+``future_obs=True`` adds ``future_obs`` (P, 6): the real IMU at t+1 … t+P, for evaluation analyses that re-observe the
+vehicle every K steps (``evaluation/analysis.py``). Never used in training.
 """
 from __future__ import annotations
 
@@ -27,10 +33,21 @@ from .dataset_builder import BuilderConfig, ModelEpisode, window_starts
 from .schema import AUXILIARY_PREFIXES
 
 
+ORACLE_SRC = ("ground_truth/wrench/external_force_W", "ground_truth/wrench/external_torque_B")
+ORACLE_KEYS = ("oracle_force_W", "oracle_torque_B")
+
+
 class ModelReadyDataset(Dataset):
     def __init__(self, episodes: Sequence[ModelEpisode], cfg: BuilderConfig,
-                 transform: Optional[Callable[[dict], dict]] = None) -> None:
+                 transform: Optional[Callable[[dict], dict]] = None, oracle: bool = False,
+                 future_obs: bool = False) -> None:
         self.episodes = list(episodes)
+        self.oracle = bool(oracle)
+        self.future_obs = bool(future_obs)
+        if self.oracle:
+            missing = [e.episode_id for e in self.episodes if ORACLE_SRC[0] not in e.aux or ORACLE_SRC[1] not in e.aux]
+            if missing:
+                raise ValueError(f"oracle=True needs the recorded wrench in every episode; missing in {missing[:3]}")
         self.cfg = cfg
         self.transform = transform
         index = [(e, int(t)) for e, ep in enumerate(self.episodes) for t in window_starts(ep.n_steps, cfg)]
@@ -59,6 +76,11 @@ class ModelReadyDataset(Dataset):
             "episode_id": ep.episode_id,
             "time_index": t,
         }
+        if self.future_obs:          # evaluation only: the real IMU at t+1 … t+P (re-observation / boundary analyses)
+            sample["future_obs"] = torch.from_numpy(np.asarray(ep.obs[t + 1: t + P + 1]))
+        if self.oracle:
+            sample["oracle_force_W"] = torch.from_numpy(np.asarray(ep.aux[ORACLE_SRC[0]][t: t + P], dtype=np.float32))
+            sample["oracle_torque_B"] = torch.from_numpy(np.asarray(ep.aux[ORACLE_SRC[1]][t: t + P], dtype=np.float32))
         if self.transform is not None:
             sample = self.transform(sample)
         leaked = [k for k in sample if k.startswith(AUXILIARY_PREFIXES)]

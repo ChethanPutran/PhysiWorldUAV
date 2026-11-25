@@ -1,0 +1,115 @@
+# Plan preview (2026-11-25): the pilot parts with the wide, stratified wind of Option C (id_wide: mean 0-5 m/s in 5 bands; ood_magnitude_wide:
+# mean 6.2-8.5 m/s in 3 bands). Use `generate plan experiment=pilot_wide_wind` to inspect the plan and scripts/plot_wind_plan.py for the speed
+# distribution. NOT a Run 6 definition: sizes are the pilot's.
+# Pilot dataset (generated in Run 5): ~1–2 % of the full volume, every data type,
+# every split role and OOD category, counterfactual groups in both modes.
+# Mix weights follow docs/datasets/problems/identifiability.md (hover ≤ 20 %).
+name: pilot_wide_wind
+dataset_id: physiworld_pilot_widewind
+dataset_version: 0.1.0-preview       # PLAN PREVIEW of the adopted wide, stratified wind (Option C); not generated
+seed: 20261116
+parts:
+  - name: id_cl                         # in-distribution, closed loop
+    roles: {train: 0.7, val_id: 0.15, test_id: 0.15}
+    n_groups: 40
+    domain: randomized
+    n_domains: 12
+    wind_regime: id_wide
+    forces: truth_default
+    counterfactual: {template: wind_magnitude, fraction: 0.3}
+    mix:
+      - {scenario: hover,            weight: 0.10, experiment_group: A}
+      - {scenario: translation,      weight: 0.10, experiment_group: B, excitation: ref_smooth}
+      - {scenario: line,             weight: 0.08, experiment_group: B}
+      - {scenario: vertical,         weight: 0.05, experiment_group: B}
+      - {scenario: accel_decel,      weight: 0.15, experiment_group: B}
+      - {scenario: circle,           weight: 0.08, experiment_group: D, excitation: multisine}
+      - {scenario: sinusoidal,       weight: 0.06, experiment_group: B}
+      - {scenario: waypoints,        weight: 0.05, experiment_group: C, excitation: prbs}
+      - {scenario: combined,         weight: 0.08, experiment_group: F, excitation: chirp}
+      - {scenario: yaw_step,         weight: 0.06, experiment_group: B}
+      - {scenario: yaw_sine,         weight: 0.04, experiment_group: B, excitation: yaw_excitation}
+      - {scenario: roll_doublet,     weight: 0.05, experiment_group: B}
+      - {scenario: pitch_doublet,    weight: 0.05, experiment_group: B}
+      - {scenario: attitude_combined, weight: 0.05, experiment_group: B}
+  - name: id_ol                         # in-distribution, open loop (system identification)
+    roles: {train: 0.7, val_id: 0.15, test_id: 0.15}
+    n_groups: 14
+    domain: randomized
+    n_domains: 6
+    wind_regime: id_wide
+    forces: truth_default
+    counterfactual: {template: wind_magnitude_fixed_action, fraction: 0.5}
+    mix:
+      - {scenario: open_loop_rotor,           weight: 0.5, experiment_group: E, excitation: rotor_doublets}
+      - {scenario: open_loop_collective_rate, weight: 0.5, experiment_group: E, excitation: rate_doublets}
+  - name: ood_mag                       # thesis primary OOD: wind magnitude (4, 8] m/s
+    roles: {val_ood_magnitude: 0.3, test_ood_magnitude: 0.7}
+    n_groups: 10
+    domain: randomized
+    n_domains: 4
+    wind_regime: ood_magnitude_wide
+    forces: truth_default
+    mix:
+      - {scenario: hover,       weight: 0.2}
+      - {scenario: translation, weight: 0.3}
+      - {scenario: accel_decel, weight: 0.3}
+      - {scenario: circle,      weight: 0.2}
+  - name: ood_dir
+    roles: {val_ood_direction: 0.3, test_ood_direction: 0.7}
+    n_groups: 6
+    domain: randomized
+    n_domains: 2
+    wind_regime: ood_direction
+    forces: truth_default
+    mix: [{scenario: hover, weight: 0.5}, {scenario: translation, weight: 0.5}]
+  - name: ood_tmp
+    roles: {val_ood_temporal: 0.3, test_ood_temporal: 0.7}
+    n_groups: 6
+    domain: randomized
+    n_domains: 2
+    wind_regime: ood_temporal
+    forces: truth_default
+    mix: [{scenario: hover, weight: 0.5}, {scenario: line, weight: 0.5}]
+  - name: ood_gst
+    roles: {val_ood_gust: 0.3, test_ood_gust: 0.7}
+    n_groups: 6
+    domain: randomized
+    n_domains: 2
+    wind_regime: ood_gust
+    forces: truth_default
+    mix: [{scenario: hover, weight: 0.5}, {scenario: accel_decel, weight: 0.5}]
+  - name: ood_phy                       # H2: physics mismatch 10–20 %
+    roles: {val_ood_physics: 0.3, test_ood_physics: 0.7}
+    n_groups: 6
+    domain: randomized
+    domain_overrides: {region: ood_physics}
+    n_domains: 4
+    wind_regime: id_wide
+    forces: truth_default
+    mix: [{scenario: translation, weight: 0.5}, {scenario: circle, weight: 0.5}]
+  - name: ood_cmb                       # unseen combination of known parameters
+    roles: {test_ood_physics: 1.0}
+    n_groups: 3
+    domain: randomized
+    domain_overrides: {region: ood_combination}
+    n_domains: 3
+    wind_regime: id_wide
+    forces: truth_default
+    mix: [{scenario: accel_decel, weight: 1.0}]
+  - name: ood_trj                       # Q8: held-out trajectory families (absent from ID mixes)
+    roles: {test_ood_trajectory: 1.0}
+    n_groups: 4
+    domain: randomized
+    n_domains: 2
+    wind_regime: id_wide
+    forces: truth_default
+    mix: [{scenario: helix, weight: 0.5}, {scenario: figure_eight, weight: 0.5}]
+  - name: phys_val                      # thesis Case A (no wind) and Case C (mass +5 %)
+    role: physics_validation
+    n_groups: 4
+    domain: nominal
+    wind_regime: none
+    forces: truth_default
+    counterfactual: {template: mass}
+    mix: [{scenario: hover, weight: 0.5}, {scenario: accel_decel, weight: 0.5}]

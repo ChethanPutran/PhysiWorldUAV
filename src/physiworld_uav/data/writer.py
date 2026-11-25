@@ -14,11 +14,17 @@ Layout of one shard file::
 Every array is validated against ``data/schema.py`` before it is written; a
 schema violation raises rather than producing a partially valid dataset.
 Each write is flushed so an interrupted run leaves complete episodes only.
+
+Integrity: every episode carries ``attrs["checksum"] = "sha256:<hex>"`` over its arrays (path, dtype, shape and bytes, in sorted
+path order), written last. ``verify_shard`` recomputes it: a bit flip, a truncated dataset or a partial write is detected.
+Episodes written before checksums existed have none (``missing``); ``add_missing_checksums`` adds them.
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterator, Mapping
+
+import hashlib
 
 import h5py
 import numpy as np
@@ -29,6 +35,15 @@ from .schema import BY_PATH, validate_arrays
 
 class SchemaError(ValueError):
     pass
+
+
+def episode_checksum(arrays: Mapping[str, np.ndarray]) -> str:
+    """SHA-256 over the episode arrays in sorted path order (path, dtype, shape, C-order bytes)."""
+    h = hashlib.sha256()
+    for path in sorted(arrays):
+        a = np.ascontiguousarray(arrays[path])
+        h.update(path.encode()); h.update(str(a.dtype).encode()); h.update(str(a.shape).encode()); h.update(a.tobytes())
+    return "sha256:" + h.hexdigest()
 
 
 class ShardWriter:
@@ -60,6 +75,7 @@ class ShardWriter:
                 chunks=(min(arr.shape[0], 1024),) + arr.shape[1:] if chunked else None,
             )
         g.attrs["metadata"] = meta.to_json()
+        g.attrs["checksum"] = episode_checksum(arrays)          # written last: an episode without it was interrupted
         self._f.flush()
 
     def close(self) -> None:
@@ -102,3 +118,35 @@ def list_metadata(shard: str | Path) -> list[EpisodeMetadata]:
     with h5py.File(shard, "r") as f:
         return [EpisodeMetadata.from_json(f["episodes"][eid].attrs["metadata"])
                 for eid in sorted(f["episodes"])]
+
+
+def verify_episode_group(g: h5py.Group) -> str:
+    """"ok" | "mismatch" | "missing" (no checksum attribute) | "unreadable" (data cannot be read back)."""
+    try:
+        stored = g.attrs.get("checksum")
+        if stored is None:
+            return "missing"
+        stored = stored.decode() if isinstance(stored, bytes) else str(stored)
+        return "ok" if episode_checksum(_collect(g)) == stored else "mismatch"
+    except Exception:  # noqa: BLE001  (truncated chunk, bad compression stream, …)
+        return "unreadable"
+
+
+def verify_shard(shard: str | Path) -> dict[str, str]:
+    """episode_id → status for every episode of the shard (read-only)."""
+    with h5py.File(shard, "r") as f:
+        return {eid: verify_episode_group(f["episodes"][eid]) for eid in sorted(f["episodes"])}
+
+
+def add_missing_checksums(shard: str | Path) -> int:
+    """Write a checksum for every episode that has none (legacy shards). Returns how many were added.
+    This only adds an attribute; the data arrays are untouched."""
+    n = 0
+    with h5py.File(shard, "a") as f:
+        for eid in sorted(f["episodes"]):
+            g = f["episodes"][eid]
+            if "checksum" not in g.attrs and "metadata" in g.attrs:
+                g.attrs["checksum"] = episode_checksum(_collect(g))
+                n += 1
+        f.flush()
+    return n

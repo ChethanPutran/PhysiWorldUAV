@@ -47,6 +47,9 @@ PARAMETERS: tuple[str, ...] = (
     "rotor_drag_scale", "body_drag_scale",
 )
 REGIONS = ("nominal", "id", "ood_physics", "ood_combination")
+# Factors that are randomised but are NOT dimensions of the space-filling design: drawn from their own generator AFTER the design, so
+# enabling them leaves every other factor of every domain unchanged (existing manifests stay reproducible).
+EXTRA_PARAMETERS: tuple[str, ...] = ("air_density_scale",)   # multiplies ρ in the body drag and the rotor-drag coefficient (∝ ρ)
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,7 @@ class DomainSamplerConfig:
     min_thrust_to_weight: float = 2.0
     holdout_corners: tuple[dict[str, float], ...] = ()
     max_rejection_factor: int = 64
+    extras: dict[str, "ParameterSpec"] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "DomainSamplerConfig":
@@ -92,6 +96,10 @@ class DomainSamplerConfig:
             raise ValueError(f"unknown domain parameters: {sorted(unknown)}")
         for name in PARAMETERS:
             params.setdefault(name, ParameterSpec())
+        extras = {k: ParameterSpec.from_dict(v) for k, v in (d.get("extra_factors") or {}).items()}
+        bad = set(extras) - set(EXTRA_PARAMETERS)
+        if bad:
+            raise ValueError(f"unknown extra domain factors {sorted(bad)}; allowed {EXTRA_PARAMETERS}")
         corners = tuple(dict(c) for c in (d.get("holdout_corners") or ()))
         for c in corners:
             for k, v in c.items():
@@ -103,7 +111,8 @@ class DomainSamplerConfig:
         return cls(parameters=params, sampler=sampler,
                    min_thrust_to_weight=float(d.get("min_thrust_to_weight", 2.0)),
                    holdout_corners=corners,
-                   max_rejection_factor=int(d.get("max_rejection_factor", 64)))
+                   max_rejection_factor=int(d.get("max_rejection_factor", 64)),
+                   extras=extras)
 
 
 @dataclass(frozen=True)
@@ -231,6 +240,10 @@ def sample_domains(
     d = len(PARAMETERS)
     budget = n * cfg.max_rejection_factor
     design = 2.0 * _unit_design(budget, d, cfg.sampler, rng) - 1.0   # [-1, 1)
+    extra_s: dict[str, np.ndarray] = {}
+    if cfg.extras:                                   # own generator, seeded from rng AFTER the design (design draws are unchanged)
+        erng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
+        extra_s = {k: 2.0 * erng.random(budget) - 1.0 for k in sorted(cfg.extras)}
     out: list[Domain] = []
     for j, s in enumerate(design):
         if region == "ood_combination":
@@ -243,6 +256,9 @@ def sample_domains(
             k: _factor(cfg.parameters[k], coords[k], use_ood=(region == "ood_physics"))
             for k in PARAMETERS
         }
+        for k, spec in cfg.extras.items():
+            factors[k] = _factor(spec, float(extra_s[k][j]), use_ood=(region == "ood_physics" and spec.ood_shell is not None))
+            coords[k] = float(extra_s[k][j])
         dom = Domain(domain_id=f"{id_prefix}_{len(out):05d}", region=region,
                      factors=factors, coordinates=coords)
         try:

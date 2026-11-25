@@ -1,0 +1,18 @@
+# ADOPTED 2026-11-25 for Run 6 (with ood_magnitude_wide.yaml): Option C. in-distribution wind with realised peak |w| <= 6 m/s (sampled mean 0-5 m/s), |w_z| <= 1 m/s,
+# same slow temporal structure as `id`. Beaufort: calm ... fresh breeze. Verified against the force-model envelope with
+# config/experiment/wind_envelope_check.yaml before adoption.
+name: id_wide
+category: id
+mean_speed: [0.0, 5.0]
+speed_strata_weights: [0.5, 1, 2, 3, 3]   # share of the groups per band (5 %, 11 %, 21 %, 32 %, 32 %): the counterfactual siblings (wind x 0 and x 0.5) add mass at low speed, so the upper bands get more groups; expected share of ID episodes per band 27/17/19/19/19 % (Monte Carlo, 35 % counterfactual groups)
+speed_strata: 5      # stratified mean speed: 5 equal bands, groups of each split role spread evenly over them (0 = i.i.d. uniform)
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: steady, weight: 0.25}
+  - {type: cosine_gust, weight: 0.15, params: {peak_mps: [0.3, 1.0], rise_time_s: [0.5, 1.5], onset_fraction: [0.15, 0.7]}}
+  - {type: step, weight: 0.15, params: {delta_mps: [-1.0, 1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.7]}}
+  - {type: sinusoid, weight: 0.15, params: {amplitude_mps: [0.2, 0.8], frequency_hz: [0.05, 0.3]}}
+  - {type: ou, weight: 0.2, params: {sigma_mps: [0.1, 0.4], tau_s: [2.0, 5.0]}}
+  - {type: random_gusts, weight: 0.1, params: {rate_hz: [0.05, 0.15], peak_range_mps: [0.3, 0.8], rise_range_s: [0.5, 1.2]}}
+limits: {peak_speed_max: 6.0, vertical_max: 1.0, mean_horizontal: [0.0, 6.0]}

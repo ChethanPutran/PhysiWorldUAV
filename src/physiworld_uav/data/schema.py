@@ -93,7 +93,8 @@ FIELDS: tuple[FieldSpec, ...] = (
                    f"{comp} torque about the base-link origin"))],
     # observations
     _F("observations/imu_accel_B", (3,), "float32", "m/s²", "body (sensor=body)", "inst", True,
-       "specific force from Isaac IMUSensor (clean; noise applied at load time, D7)"),
+       "specific force at the base link from Isaac IMUSensor, with the sensor's -ω_B×v_B transport term removed when "
+       "sim.imu_transport_correction is true (datasets from v0.6.0; the Run 5 pilot v0.5.0 holds the raw sensor). Clean; noise applied at load time, D7"),
     _F("observations/imu_gyro_B", (3,), "float32", "rad/s", "body", "inst", True, "IMU angular rate"),
     _F("observations/imu_valid", (), "bool", "-", "-", "inst", True, "fresh sensor frame at t_k"),
     # actions

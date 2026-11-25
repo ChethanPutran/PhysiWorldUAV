@@ -1,0 +1,36 @@
+# Tracking-stability check of a 20 Hz controller (model step 0.05 s) against the 50 Hz pilot setting (0.02 s). Run the SAME plan twice:
+#   generate run experiment=stability_20hz physics=isaac_200hz     experiment.dataset_id=stab50
+#   generate run experiment=stability_20hz physics=isaac_200hz_m20  experiment.dataset_id=stab20
+# and compare the position tracking error (data/analysis: scripts/compare_tracking.py). Closed loop, nominal vehicle, aero truth, 10 s episodes;
+# one part without wind, one with the wide ID wind (the harder case for a slow controller).
+name: stability_20hz
+dataset_id: stab
+dataset_version: 0.1.0
+seed: 20261125
+parts:
+  - name: calm
+    roles: {train: 1.0}
+    n_groups: 12
+    domain: nominal
+    wind_regime: none
+    forces: truth_default
+    mix: &mix
+      - {scenario: hover,            weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: translation,      weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: line,             weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: accel_decel,      weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: circle,           weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: sinusoidal,       weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: combined,         weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: waypoints,        weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: vertical,         weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: yaw_step,         weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: roll_doublet,     weight: 1, overrides: {duration_s: 10.0}}
+      - {scenario: attitude_combined, weight: 1, overrides: {duration_s: 10.0}}
+  - name: windy
+    roles: {train: 1.0}
+    n_groups: 12
+    domain: nominal
+    wind_regime: id_wide
+    forces: truth_default
+    mix: *mix
