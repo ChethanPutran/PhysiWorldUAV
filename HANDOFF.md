@@ -9,6 +9,7 @@ Read first: `CLAUDE.md` (architecture, commands, gotchas), `docs/problems_log.md
 * Live page and its writer (`scripts/live_monitor.py --html`) and the web server on the port in `logs/http_live.port` may still be running; stop them if not needed (kill by PID).
 * Wind probe done on 8 trained models (C14): latent h carries no readable wind force (R² ≤ 0 everywhere; torque control 0.8). `scripts/run_probes.sh`, `outputs/eval/probe_*.json`.
 * Wind plan for Run 6 DECIDED (2026-11-25): wide ranges + stratified, upper-band-weighted mean speed (`config/wind/regimes/id_wide.yaml`, `ood_magnitude_wide.yaml`; planner keys `speed_strata`, `speed_strata_weights`; preview `config/experiment/pilot_wide_wind.yaml`, manifest-only dir `data/datasets/physiworld_pilot_widewind_v0.1.0-preview` (can be deleted)). Run 6 itself is NOT started.
+* 20 Hz tracking check done (`docs/results/tracking_20hz_vs_50hz.md`): the 20 Hz controller is stable, position scenarios identical, attitude-mode scenarios worse in one of two cases (n=1). v7 plan previewed: `data/datasets/physiworld_pilot_v7_v0.7.0` (manifest only, 4,530 episodes, 906k model steps, 473 vehicles); generation NOT started (waits for the user: ~42 worker-hours, 5-6 h with 8 workers).
 * Decisions waiting: which next experiments (longer history; non-linear probe; wind-range augmentation; stronger weight decay; OOD-aware checkpoint selection), Run 6 wind range and sizing.
 
 ## Training and report: FINISHED (2026-11-24)

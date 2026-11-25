@@ -111,3 +111,5 @@ Reset checklist: edit the boxes above.
 - [ ] **(added)** Next experiments (need approval): longer history; non-linear probe; wind-range augmentation; stronger weight decay; OOD-aware checkpoint selection
 - [x] **(added)** Wind plan for Run 6: wide ID (0–5 m/s mean) and OOD (6.2–8.5 m/s) ranges with stratified, upper-band-weighted mean speed implemented in the planner (`speed_strata`, `speed_strata_weights`), tested, plan preview `config/experiment/pilot_wide_wind.yaml`; nothing generated
 - [ ] **(added)** Run 6 not started: sizing (episodes, domains, Mode B in test roles), envelope re-check of the wide wind, learning-curve experiment for the model-size / data question
+- [x] **(added)** 20 Hz model step supported end to end (decimation and model step read from the manifest; evaluation refuses a rate mismatch); tracking check at 20 Hz vs 50 Hz: `docs/results/tracking_20hz_vs_50hz.md`
+- [ ] **(added)** Pilot v7 generation (4,530 episodes, 20 Hz, stratified wide wind): planned and previewed, waits for approval
