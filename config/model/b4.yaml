@@ -1,0 +1,2 @@
+# Model selection (keys are TrainConfig fields; sizes live in config/training/default.yaml).
+kind: b4

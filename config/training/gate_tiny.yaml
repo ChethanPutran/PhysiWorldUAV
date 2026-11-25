@@ -1,0 +1,9 @@
+# G1 tiny-overfit gate (scripts/run_baseline_gates.sh): 8 episodes, clean IMU.
+epochs: 150
+lr: 0.003
+batch_size: 128
+patience: 1000
+horizon_stages: [20]
+warmup_steps: 20
+noise: none
+val_noise: none

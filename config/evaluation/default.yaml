@@ -1,0 +1,8 @@
+# Evaluation defaults for evaluation.run / evaluation.analysis (command-line flags override).
+horizon: 20
+noise: nominal          # none | low | nominal | high  (headline results use nominal)
+initial_state: given    # given | decoder
+roles: [val_id, test_id, test_ood_magnitude, test_ood_direction, test_ood_temporal, test_ood_gust, test_ood_physics, test_ood_trajectory]
+n_boot: 500
+every: [1, 5, 10]       # analysis anchor: re-observe every K steps
+mode: h                 # analysis anchor: h (real IMU into the latent) | state (also the true state)

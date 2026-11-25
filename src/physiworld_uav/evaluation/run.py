@@ -12,9 +12,10 @@ from pathlib import Path
 import torch
 
 from physiworld_uav.data.dataset import ModelReadyDataset
-from physiworld_uav.data.dataset_builder import BuilderConfig, load_model_episodes
+from physiworld_uav.data.dataset_builder import (IMU_RAW_WARNING, BuilderConfig, dataset_decimation, dataset_sim, imu_transport_status,
+                                                 load_model_episodes)
 from physiworld_uav.data.noise import ImuNoise
-from physiworld_uav.models.world_model import build_model
+from physiworld_uav.models.world_model import build_model, check_obs_mode, set_phi_noise
 from physiworld_uav.training import checkpoint as ckpt
 from physiworld_uav.training.trainer import build_from_checkpoint, pick_device
 from .evaluator import evaluate
@@ -37,24 +38,47 @@ def physics_validation_cases(episodes):
 
 
 def load_model(spec: str, dataset_dir: Path, device):
+    """(name, model, window settings stored in the checkpoint or None for B0/B1)."""
     name, _, path = spec.partition("=")
-    if name in ("b0", "b1"):
-        return name, build_model(name)
+    dt = dataset_sim(dataset_dir)["model_dt"]                        # 0.02 s for the 50 Hz pilots, 0.05 s for a 20 Hz dataset
+    if name in ("b0", "b1", "b6a_future", "b6a_current"):          # nothing to load: no learned parameters
+        return name, build_model(name, dt=dt), None
     state = ckpt.load(path, map_location=device)
-    return name, build_from_checkpoint(state)
+    if abs(float(state["dt"]) - dt) > 1e-9:
+        raise SystemExit(f"{name}: the checkpoint was trained at a model step of {state['dt']} s, the dataset has {dt} s; "
+                         f"a model must be evaluated at the rate it was trained at")
+    return name, build_from_checkpoint(state), checkpoint_window(state)
+
+
+def checkpoint_window(state: dict) -> dict:
+    """History length and observation mode a checkpoint was trained with (older checkpoints: from train_cfg, else 10/instant)."""
+    tc = state.get("train_cfg", {})
+    return {"history": int(state.get("history", tc.get("history", 10))), "obs_mode": state.get("obs_mode", tc.get("obs_mode", "instant"))}
+
+
+def common_window(windows: list, default_history: int | None) -> dict:
+    """One window setting for all models in a comparison: all checkpoints must agree (fair comparison)."""
+    ws = [w for w in windows if w]
+    if not ws:
+        return {"history": default_history or 10, "obs_mode": "instant"}
+    if len({(w["history"], w["obs_mode"]) for w in ws}) > 1:
+        raise SystemExit(f"checkpoints were trained with different windows {ws}; evaluate them separately")
+    if default_history and default_history != ws[0]["history"]:
+        raise SystemExit(f"--history {default_history} differs from the checkpoint's {ws[0]['history']}")
+    return ws[0]
 
 
 def markdown(results: dict, ks) -> str:
     lines = []
     for role in next(iter(results.values())).keys():
-        lines += [f"\n### {role}\n", "| model | windows | episodes | " + " | ".join(f"pos@{k} [m]" for k in ks) + " | att@last [deg] | reliable [steps] |",
+        lines += [f"\n### {role}\n", "| model | windows | episodes | " + " | ".join(f"pos RMSE@{k} [m]" for k in ks) + " | att RMSE@last [deg] | reliable [steps] |",
                   "|---|---|---|" + "---|" * (len(ks) + 2)]
         for m, per in results.items():
             r = per[role]
             if not r.get("n_windows"):
                 lines.append(f"| {m} | 0 | 0 |" + " |" * (len(ks) + 2)); continue
-            att = r["att_deg"][str(ks[-1])]
-            lines.append(f"| {m} | {r['n_windows']} | {r['n_episodes']} | " + " | ".join(f"{r['pos_m'][str(k)]:.4f}" for k in ks)
+            att = r["att_rmse_deg"][str(ks[-1])]
+            lines.append(f"| {m} | {r['n_windows']} | {r['n_episodes']} | " + " | ".join(f"{r['pos_rmse_m'][str(k)]:.4f}" for k in ks)
                          + f" | {att:.2f} | {r['reliable_horizon_mean']:.1f} |")
     return "\n".join(lines)
 
@@ -62,17 +86,25 @@ def markdown(results: dict, ks) -> str:
 def main(argv=None) -> dict:
     p = argparse.ArgumentParser(prog="evaluate", description=__doc__.split("\n\n")[0])
     p.add_argument("--dataset", type=Path, required=True)
-    p.add_argument("--models", nargs="+", required=True, help="b0 | b1 | b2=<checkpoint.pt>")
+    p.add_argument("--config", type=Path, default=None, help="evaluation defaults (config/evaluation/default.yaml); flags override")
+    p.add_argument("--models", nargs="+", required=True, help="b0 | b1 | b6a_future | b6a_current | <kind>=<checkpoint.pt> (b2, b3, b4, b5a, b5b, b6b_*)")
     p.add_argument("--roles", nargs="*", default=list(ROLE_GROUPS) + ["physics_validation"])
     p.add_argument("--horizon", type=int, default=20)
+    p.add_argument("--history", type=int, default=None, help="default: read from the checkpoint(s); 10 for b0/b1 only")
     p.add_argument("--initial-state", default="given", choices=["given", "decoder"])
     p.add_argument("--limit-episodes", type=int, default=0, help="use only the first N episodes (sorted by id) of each role, e.g. the tiny-overfit set")
-    p.add_argument("--noise", default="none", help="IMU noise preset for evaluation (none|low|nominal|high)")
+    p.add_argument("--noise", default="nominal", help="IMU noise preset for evaluation (none|low|nominal|high)")
     p.add_argument("--device", default="auto")
     p.add_argument("--out", type=Path, default=None)
+    pre = argparse.ArgumentParser(add_help=False)               # --config first: its values become the defaults of the other flags
+    pre.add_argument("--config", type=Path, default=None)
+    from physiworld_uav.training.config_io import eval_defaults
+    p.set_defaults(**eval_defaults(pre.parse_known_args(argv)[0].config))
     a = p.parse_args(argv)
     device = pick_device(a.device)
-    bcfg = BuilderConfig(decimation=4, history=10, horizon=a.horizon)
+    loaded = [load_model(spec, a.dataset, device) for spec in a.models]
+    win = common_window([w for _, _, w in loaded], a.history)
+    bcfg = BuilderConfig(decimation=dataset_decimation(a.dataset), history=win["history"], horizon=a.horizon, obs_mode=win["obs_mode"])
     groups: dict[str, list] = {}
     for role in a.roles:
         if role == "physics_validation":
@@ -82,10 +114,15 @@ def main(argv=None) -> dict:
         if a.limit_episodes:
             groups[role] = sorted(groups[role], key=lambda e: e.episode_id)[: a.limit_episodes]
     results: dict = {}
-    for spec in a.models:
-        name, model = load_model(spec, a.dataset, device)
-        init = a.initial_state if name not in ("b0", "b1") else "given"
-        results[name] = {role: evaluate(model, ModelReadyDataset(eps, bcfg, transform=ImuNoise(a.noise, 777) if a.noise != "none" else None), horizon=a.horizon, device=device,
+    all_eps = [e for v in groups.values() for e in v]
+    if any(hasattr(m, "synth_imu") for _, m, _ in loaded) and imu_transport_status(all_eps) in ("raw", "mixed"):
+        print("WARNING:", IMU_RAW_WARNING)
+    for name, model, _ in loaded:
+        check_obs_mode(model, bcfg.obs_mode)
+        set_phi_noise(model, a.noise)       # φ's synthetic IMU gets the same white noise as the real IMU
+        init = a.initial_state if name not in ("b0", "b1", "b6a_future", "b6a_current") else "given"
+        results[name] = {role: evaluate(model, ModelReadyDataset(eps, bcfg, transform=ImuNoise(a.noise, 777) if a.noise != "none" else None,
+                                                          oracle=getattr(model, "needs_oracle", False)), horizon=a.horizon, device=device,
                                         initial_state=init, ks=[k for k in (1, 5, 10, 20, 50, 100) if k <= a.horizon])
                          for role, eps in groups.items() if eps or True}
     ks = [k for k in (1, 5, 10, 20, 50, 100) if k <= a.horizon]

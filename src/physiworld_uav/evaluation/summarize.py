@@ -15,6 +15,14 @@ import shutil
 from pathlib import Path
 
 
+def _pos(v: dict) -> dict:        # RMSE (current records) or the legacy mean-error key ``pos_m`` (older runs)
+    return v.get("pos_rmse_m") or v.get("pos_m") or {}
+
+
+def _att(v: dict) -> dict:
+    return v.get("att_rmse_deg") or v.get("att_deg") or {}
+
+
 def load_runs(root: Path) -> dict[str, dict]:
     runs = {}
     for d in sorted(Path(root).iterdir()) if Path(root).exists() else []:
@@ -32,29 +40,29 @@ def load_runs(root: Path) -> dict[str, dict]:
 def write_csv(runs: dict, path: Path) -> None:
     with path.open("w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["run", "epoch", "horizon", "lr", "train_total", "train_state", "train_roll", "val_pos1_m", "val_pos20_m", "val_att20_deg", "val_reliable_steps", "metric", "best", "epoch_s", "windows_per_s"])
+        w.writerow(["run", "epoch", "horizon", "lr", "train_total", "train_state", "train_roll", "val_pos_rmse1_m", "val_pos_rmse20_m", "val_att_rmse20_deg", "val_reliable_steps", "metric", "best", "epoch_s", "windows_per_s"])
         for name, r in runs.items():
             for e in r["epochs"]:
                 v = e.get("val") or {}
                 w.writerow([name, e["epoch"], e["horizon"], f"{e['lr']:.3g}", f"{e['train']['total']:.6g}", f"{e['train']['state']:.6g}", f"{e['train']['roll']:.6g}",
-                            f"{v['pos_m']['1']:.5g}" if v else "", f"{v['pos_m']['20']:.5g}" if v and "20" in v["pos_m"] else "",
-                            f"{v['att_deg']['20']:.4g}" if v and "20" in v["att_deg"] else "", f"{v['reliable_horizon']:.3g}" if v else "",
+                            f"{_pos(v)['1']:.5g}" if v else "", f"{_pos(v)['20']:.5g}" if v and "20" in _pos(v) else "",
+                            f"{_att(v)['20']:.4g}" if v and "20" in _att(v) else "", f"{v['reliable_horizon']:.3g}" if v else "",
                             f"{e['metric']:.6g}", f"{e['best']:.6g}", f"{e['epoch_s']:.2f}", f"{e['windows_per_s']:.0f}"])
 
 
 def markdown(runs: dict) -> str:
-    L = ["# Training runs", "", "| run | model | status | epochs | horizon | first train loss | last train loss | loss ratio | best metric | last val pos@20 [m] | params | s/epoch |", "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    L = ["# Training runs", "", "| run | model | status | epochs | horizon | first train loss | last train loss | loss ratio | best metric | last val pos RMSE@20 [m] | params | s/epoch |", "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for name, r in runs.items():
         e0, e1 = r["epochs"][0], r["epochs"][-1]; v = e1.get("val")
         status = "finished" if r["summary"] else "running"
-        v_pos = format(v["pos_m"]["20"], ".4f") if v and "20" in v["pos_m"] else "–"
+        v_pos = format(_pos(v)["20"], ".4f") if v and "20" in _pos(v) else "–"
         stop = f" ({r['summary']['stop_reason']})" if r["summary"] else ""
         ratio = e0["train"]["total"] / max(e1["train"]["total"], 1e-12)
         spe = sum(x["epoch_s"] for x in r["epochs"]) / len(r["epochs"])
         L.append(f"| {name} | {r['config'].get('train', {}).get('kind', '?')} | {status}{stop} | {len(r['epochs'])} | {e1['horizon']} | "
                  f"{e0['train']['total']:.4g} | {e1['train']['total']:.4g} | {ratio:.0f}× | {e1['best']:.4g} | {v_pos} | {r['provenance'].get('n_params', '?')} | {spe:.1f} |")
     L += ["", "Train loss is the thesis loss (decoder term + rescaled rollout term) on the current curriculum horizon; it is **not comparable across horizons**. "
-          "Validation position error is on `val_id`, 20-step rollouts, given initial state."]
+          "Validation position RMSE is on `val_id`, 20-step rollouts, given initial state."]
     return "\n".join(L)
 
 
@@ -66,10 +74,10 @@ def curves(runs: dict, path: Path) -> None:
     for name, r in runs.items():
         ep = [e["epoch"] for e in r["epochs"]]
         ax[0].plot(ep, [e["train"]["total"] for e in r["epochs"]], label=name)
-        v = [(e["epoch"], e["val"]["pos_m"]["20"]) for e in r["epochs"] if e.get("val") and "20" in e["val"]["pos_m"]]
+        v = [(e["epoch"], _pos(e["val"])["20"]) for e in r["epochs"] if e.get("val") and "20" in _pos(e["val"])]
         if v:
             ax[1].plot(*zip(*v), label=name)
-    ax[0].set(title="training loss (log)", xlabel="epoch", yscale="log"); ax[1].set(title="val_id position error at 20 steps [m]", xlabel="epoch", yscale="log")
+    ax[0].set(title="training loss (log)", xlabel="epoch", yscale="log"); ax[1].set(title="val_id position RMSE at 20 steps [m]", xlabel="epoch", yscale="log")
     for a in ax:
         a.grid(alpha=.25); a.legend(fontsize=7)
     fig.savefig(path, dpi=120); plt.close(fig)
