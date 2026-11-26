@@ -21,6 +21,8 @@ DATASET="${DATASET:-data/datasets/physiworld_pilot_v7_v0.7.0}"
 WORKERS="${WORKERS:-9}"; GPUS="${GPUS:-0,1,2}"
 MIN_FREE_GB="${MIN_FREE_GB:-40}"
 REPORT_PORT="${REPORT_PORT:-60193}"
+# the report page listens on 0.0.0.0 (reachable from the campus network, no login) only while the file logs/REPORT_PUBLIC exists; else 127.0.0.1
+if [ -f logs/REPORT_PUBLIC ]; then REPORT_HOST="${REPORT_HOST:-0.0.0.0}"; else REPORT_HOST="${REPORT_HOST:-127.0.0.1}"; fi
 say() { echo "[$(date '+%F %T')] $*"; }
 mkdir -p logs
 exec 9>"$REPO/logs/.resume_on_boot.lock"; flock -n 9 || { say "another resume_on_boot is running; exit"; exit 0; }
@@ -57,14 +59,14 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 CMD="cd /workspace/PhysiWorldUAV && source omnidrones_env/bin/activate && export PYTHONPATH=\$PWD/src:\$PYTHONPATH OMP_NUM_THREADS=4 HDF5_USE_FILE_LOCKING=FALSE && scripts/generate_parallel.sh --workers $WORKERS --gpus $GPUS -- experiment=$EXPERIMENT physics=$PHYSICS > logs/gen_${EXPERIMENT}_boot_$STAMP.log 2>&1"
 if [ "${DRY_RUN:-0}" = 1 ]; then
   say "DRY RUN: would run in $CONTAINER: $CMD"
-  say "DRY RUN: would (re)start the dataset report page on port $REPORT_PORT if nothing listens there"
+  say "DRY RUN: would (re)start the dataset report page on $REPORT_HOST:$REPORT_PORT if nothing listens there"
   exit 0
 fi
 say "resuming $EXPERIMENT: $WORKERS workers on GPUs $GPUS (${free_gb} GB RAM available)"
 docker exec -d "$CONTAINER" bash -c "$CMD"
 if ! ss -ltn 2>/dev/null | grep -q ":$REPORT_PORT "; then
-  PYTHONPATH="$REPO/src" nohup python3 -m physiworld_uav.visualization.dataset_report --dataset "$DATASET" --serve --host 127.0.0.1 --port "$REPORT_PORT" \
+  PYTHONPATH="$REPO/src" nohup python3 -m physiworld_uav.visualization.dataset_report --dataset "$DATASET" --serve --host "$REPORT_HOST" --port "$REPORT_PORT" \
       > logs/dataset_report_serve.log 2>&1 &
-  say "dataset report page restarted on 127.0.0.1:$REPORT_PORT"
+  say "dataset report page restarted on $REPORT_HOST:$REPORT_PORT"
 fi
 say "started; logs/gen_${EXPERIMENT}_boot_$STAMP.log"
