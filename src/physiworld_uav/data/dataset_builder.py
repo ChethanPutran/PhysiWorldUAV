@@ -66,6 +66,13 @@ class BuilderConfig:
     obs_mode: str = "instant"         # instant | interval_mean
     statuses: tuple[str, ...] = ("completed",)
     exclude_open_loop_kinds: tuple[str, ...] = ("body_wrench",)
+    # Episodes that ended early (``terminated_ground`` = ground contact, ``terminated_envelope`` = left the force-model envelope) are valid
+    # physics up to their last steps. ``extra_statuses`` makes them eligible, but ONLY in the roles of ``extra_status_roles`` (default: the
+    # training role), so validation and test sets keep ``statuses`` only. ``tail_trim`` drops the last k model steps of episodes with the given
+    # status (a ground-contact episode ends with the impact, which the model does not describe).
+    extra_statuses: tuple[str, ...] = ()
+    extra_status_roles: tuple[str, ...] = ("train",)
+    tail_trim: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
         if self.action_key not in ACTION_KEYS:
@@ -87,6 +94,9 @@ class BuilderConfig:
             obs_mode=str(cfg_get(cfg, "obs_mode", "instant")),
             statuses=tuple(cfg_get(cfg, "statuses", ("completed",))),
             exclude_open_loop_kinds=tuple(cfg_get(cfg, "exclude_open_loop_kinds", ("body_wrench",))),
+            extra_statuses=tuple(cfg_get(cfg, "extra_statuses", ())),
+            extra_status_roles=tuple(cfg_get(cfg, "extra_status_roles", ("train",))),
+            tail_trim=tuple((str(k), int(v)) for k, v in dict(cfg_get(cfg, "tail_trim", {})).items()),
         )
 
 
@@ -125,9 +135,22 @@ def to_model_episode(arrays: Mapping[str, np.ndarray], meta: EpisodeMetadata,
     if act.shape[0] != m:
         raise ValueError(f"{meta.episode_id}: {act.shape[0]} actions for {m} model steps")
     aux = {p: dec[p] for p in AUX_FIELDS if p in dec}
-    return ModelEpisode(episode_id=meta.episode_id, meta=meta, t=t, states=states,
-                        obs=obs.astype(np.float32), actions=act.astype(np.float32),
-                        dt=float(t[1] - t[0]), aux=aux)
+    ep = ModelEpisode(episode_id=meta.episode_id, meta=meta, t=t, states=states,
+                      obs=obs.astype(np.float32), actions=act.astype(np.float32),
+                      dt=float(t[1] - t[0]), aux=aux)
+    k = dict(cfg.tail_trim).get(meta.status, 0)
+    return trim_tail(ep, k) if k > 0 else ep
+
+
+def trim_tail(ep: ModelEpisode, k: int) -> ModelEpisode:
+    """The episode without its last ``k`` model steps (every array is aligned to the model steps, so each loses its last k rows and the
+    states / actions relation (one more state than actions) is kept). An episode that would keep fewer than 2 steps is returned with 2."""
+    k = int(max(0, min(k, ep.actions.shape[0] - 2)))
+    if k == 0:
+        return ep
+    cut = lambda a: a[:-k] if a.shape[0] > k else a  # noqa: E731
+    return ModelEpisode(episode_id=ep.episode_id, meta=ep.meta, t=cut(ep.t), states=cut(ep.states), obs=cut(ep.obs), actions=cut(ep.actions),
+                        dt=ep.dt, aux={n: cut(a) for n, a in ep.aux.items()})
 
 
 def imu_transport_status(episodes: Sequence) -> str:
@@ -144,7 +167,7 @@ IMU_RAW_WARNING = ("this dataset holds the RAW Isaac IMU (accelerometer = specif
 
 
 def _eligible(meta: EpisodeMetadata, cfg: BuilderConfig, roles: Sequence[str] | None) -> bool:
-    if meta.status not in cfg.statuses:
+    if meta.status not in cfg.statuses and not (meta.status in cfg.extra_statuses and meta.split_role in cfg.extra_status_roles):
         return False
     if roles is not None and meta.split_role not in roles:
         return False

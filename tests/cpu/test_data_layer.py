@@ -256,3 +256,29 @@ def test_evaluation_refuses_a_model_trained_at_another_rate(tmp_path):
                      "model_cfg": {"latent": 8, "embed": 4, "hidden": 8}, "dt": 0.02}, tmp_path / "m.pt")
     with pytest.raises(SystemExit):
         load_model(f"b2={tmp_path / 'm.pt'}", tmp_path, torch.device("cpu"))
+
+
+# ------------------------------------------------------------------ early-ended episodes in the training role only
+def test_extra_statuses_are_eligible_in_the_training_role_only():
+    from physiworld_uav.data.dataset_builder import BuilderConfig, _eligible
+    cfg = BuilderConfig(decimation=D, extra_statuses=("terminated_ground", "terminated_envelope"))
+    assert _eligible(meta(status="completed"), cfg, None)
+    assert _eligible(meta(role="train", status="terminated_ground"), cfg, None)
+    assert _eligible(meta(role="train", status="terminated_envelope"), cfg, ["train"])
+    assert not _eligible(meta(role="val_id", status="terminated_ground"), cfg, ["val_id"])      # validation keeps completed episodes only
+    assert not _eligible(meta(role="test_id", status="terminated_envelope"), cfg, None)
+    assert not _eligible(meta(role="train", status="terminated_ground"), BuilderConfig(decimation=D), None)   # default: unchanged behaviour
+    assert not _eligible(meta(role="train", status="failed_sim"), cfg, None)
+
+
+def test_tail_trim_drops_the_last_steps_of_every_aligned_array():
+    from physiworld_uav.data.dataset_builder import BuilderConfig, to_model_episode, trim_tail
+    a = synthetic_episode()
+    full = to_model_episode(a, meta(status="terminated_ground"), BuilderConfig(decimation=D))
+    cut = to_model_episode(a, meta(status="terminated_ground"), BuilderConfig(decimation=D, tail_trim=(("terminated_ground", 3),)))
+    assert cut.n_steps == full.n_steps - 3 and cut.states.shape[0] == cut.actions.shape[0] + 1 and cut.obs.shape[0] == full.obs.shape[0] - 3
+    assert np.array_equal(cut.states, full.states[:-3]) and np.array_equal(cut.actions, full.actions[:-3])
+    assert all(v.shape[0] == full.aux[k].shape[0] - 3 for k, v in cut.aux.items())
+    other = to_model_episode(a, meta(status="completed"), BuilderConfig(decimation=D, tail_trim=(("terminated_ground", 3),)))
+    assert other.n_steps == full.n_steps                                                       # other statuses are not trimmed
+    assert trim_tail(full, 10 ** 6).n_steps == 2 and trim_tail(full, 0) is full

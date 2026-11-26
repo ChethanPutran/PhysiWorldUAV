@@ -114,3 +114,6 @@ Reset checklist: edit the boxes above.
 - [x] **(added)** 20 Hz model step supported end to end (decimation and model step read from the manifest; evaluation refuses a rate mismatch); tracking check at 20 Hz vs 50 Hz: `docs/results/tracking_20hz_vs_50hz.md`
 - [ ] **(added)** Pilot v7 generation (4,530 episodes, 20 Hz, stratified wide wind): planned and previewed, waits for approval
 - [x] **(added)** Automatic resume of an unfinished generation after a server restart (`scripts/resume_on_boot.sh`, container restart policy, `@reboot` cron; stop switch `logs/AUTO_RESUME`); dataset report page shows running / queued / pending / done per episode while a parallel generation runs
+- [x] **(added)** Pilot v7 generated (4,530 episodes, 20 Hz, stratified wide wind), merged and validated (hard 0, soft 835); 908 open-loop episodes ended early (B23)
+- [x] **(added)** Early-ended episodes usable for training only (builder `extra_statuses` / `tail_trim`, trainer `train_extra_statuses`, `tail_trim_ground`, `fit_on`); not yet trained
+- [ ] **(added)** Look at the 835 soft validation findings of v7; train on v7 (needs approval)

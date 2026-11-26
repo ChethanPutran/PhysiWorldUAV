@@ -412,6 +412,18 @@ def test_trainer_runs_the_spec_3_4_variants(tmp_path):
         assert (tmp_path / name / "checkpoints" / "best.pt").exists()
 
 
+def test_trainer_accepts_the_early_ended_episode_settings(tmp_path):
+    import json
+    eps = [synthetic_episode(f"e{i}", i) for i in range(2)]; val = [synthetic_episode("v0", 9)]
+    logs = []
+    cfg = _cfg(epochs=1, kind="b3", train_extra_statuses=["terminated_ground", "terminated_envelope"], tail_trim_ground=3, fit_on="closed_loop")
+    train(tmp_path / "d", tmp_path / "r", cfg, episodes=(eps, val), log=logs.append)
+    assert any("training episodes by status" in str(l) and "closed_loop" in str(l) for l in logs)
+    assert json.loads((tmp_path / "r" / "config.yaml").read_text())["train"]["train_extra_statuses"] == ["terminated_ground", "terminated_envelope"]
+    with pytest.raises(ValueError):
+        train(tmp_path / "d", tmp_path / "r2", _cfg(epochs=1, fit_on="nonsense"), episodes=(eps, val), log=lambda *_: None)
+
+
 # ----------------------------------------------------------------- φ → E, residual penalty, probe (Run-5 model changes)
 def _b3(**kw):
     eps = [synthetic_episode(f"e{i}", i, wind_acc=(0.5, 0, 0)) for i in range(2)]

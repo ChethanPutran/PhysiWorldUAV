@@ -44,6 +44,9 @@ enc_uses_u: false
 obs_mode: instant
 history: 10
 keep_epoch_checkpoints: 3
+train_extra_statuses: []   # early-ended episodes (terminated_ground, terminated_envelope) used for TRAINING only; [] = completed episodes only
+tail_trim_ground: 5        # model steps dropped from the end of a ground-contact episode (the impact)
+fit_on: all                # all | closed_loop: episodes used for the normalisation statistics and the loss weights
 noise: nominal
 val_noise: nominal
 use_tensorboard: false

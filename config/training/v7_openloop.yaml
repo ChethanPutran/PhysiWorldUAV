@@ -1,0 +1,7 @@
+# Pilot v7: use the early-ended open-loop episodes for TRAINING only (the validation and test roles keep completed episodes only).
+# They are valid physics up to their last steps and cover much wider speeds, rates and tilts than the closed-loop flights; a ground-contact
+# episode loses its last tail_trim_ground steps (the impact). Statistics and loss weights are fitted on the closed-loop episodes so that the
+# wild windows do not inflate the normalisation (they would shrink the weight of normal flight). Use after default.yaml (and compare.yaml).
+train_extra_statuses: [terminated_ground, terminated_envelope]
+tail_trim_ground: 5
+fit_on: closed_loop

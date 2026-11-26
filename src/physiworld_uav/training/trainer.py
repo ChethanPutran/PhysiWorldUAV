@@ -80,6 +80,9 @@ class TrainConfig:
     obs_mode: str = "instant"             # φ needs "instant"
     history: int = 10
     keep_epoch_checkpoints: int = 3
+    train_extra_statuses: list = field(default_factory=list)   # e.g. ["terminated_ground", "terminated_envelope"]: early-ended episodes used for TRAINING only
+    tail_trim_ground: int = 5             # model steps dropped from the end of a ground-contact episode (the impact)
+    fit_on: str = "all"                   # "closed_loop": normalisation statistics and loss weights are fitted on the closed-loop training episodes only
     noise: str = "nominal"                 # IMU noise preset for training windows (data/noise.py); "none" = sanity run only
     val_noise: str = "nominal"
     use_tensorboard: bool = False
@@ -156,7 +159,13 @@ def train(dataset_dir: str | Path, out_dir: str | Path, cfg: TrainConfig, *, res
     needs_oracle = cfg.kind.startswith("b6")        # B6b only: the recorded wrench is an input (reference upper bound)
     P = int(max(cfg.horizon_stages))
     dec = dataset_decimation(dataset_dir)          # 4 for the 50 Hz pilots, 10 for a 20 Hz dataset (read from the manifest)
-    bcfg = BuilderConfig(decimation=dec, history=cfg.history, horizon=P, obs_mode=cfg.obs_mode)
+    extra = tuple(cfg.train_extra_statuses)
+    tail = (("terminated_ground", int(cfg.tail_trim_ground)),) if cfg.tail_trim_ground > 0 and "terminated_ground" in extra else ()
+
+    def make_bcfg(h: int) -> BuilderConfig:        # early-ended episodes are eligible in the training role only (BuilderConfig.extra_status_roles)
+        return BuilderConfig(decimation=dec, history=cfg.history, horizon=int(h), obs_mode=cfg.obs_mode, extra_statuses=extra, tail_trim=tail)
+
+    bcfg = make_bcfg(P)
 
     if episodes is not None:                       # (train_eps, val_eps) injected, e.g. by tests
         train_eps, val_eps = list(episodes[0]), list(episodes[1])
@@ -168,7 +177,7 @@ def train(dataset_dir: str | Path, out_dir: str | Path, cfg: TrainConfig, *, res
         val_eps = []
 
     def stage_cfg(h: int) -> BuilderConfig:        # windows are built per curriculum stage: stage h needs only h future steps
-        return BuilderConfig(decimation=dec, history=cfg.history, horizon=int(h), obs_mode=cfg.obs_mode)
+        return make_bcfg(h)
 
     train_noise = ImuNoise(cfg.noise, cfg.seed, deterministic=False) if cfg.noise != "none" else None
     _stage_ds: dict = {}
@@ -201,11 +210,21 @@ def train(dataset_dir: str | Path, out_dir: str | Path, cfg: TrainConfig, *, res
         model = build_from_checkpoint(state); weights = LossWeights(**state["loss_weights"]); winfo = None
         log(f"resuming from epoch {state['epoch']} (step {state['step']})")
     else:
-        stats = fit_stats(train_eps)
+        if cfg.fit_on not in ("all", "closed_loop"):
+            raise ValueError("fit_on must be 'all' or 'closed_loop'")
+        fit_eps = [e for e in train_eps if e.meta is None or not (e.meta.plan or {}).get("open_loop")] if cfg.fit_on == "closed_loop" else train_eps
+        if not fit_eps:
+            raise ValueError("fit_on='closed_loop' but there is no closed-loop training episode")
+        by_status = {}
+        for e in train_eps:
+            st = getattr(e.meta, "status", "?") if e.meta is not None else "?"
+            by_status[st] = by_status.get(st, 0) + 1
+        log(f"training episodes by status: {by_status}; statistics and loss weights fitted on {len(fit_eps)} episodes ({cfg.fit_on})")
+        stats = fit_stats(fit_eps)
         dt0 = train_eps[0].dt
         model = build_model(cfg.kind, stats=stats, cfg=model_cfg_of(cfg), dt=dt0)
         hw = min(20, P)                              # weights are fitted on hold-last-state errors at this horizon
-        weights, winfo = fit_loss_weights(ModelReadyDataset(train_eps, stage_cfg(hw)), hw, gamma=cfg.gamma, lambda_roll=cfg.lambda_roll,
+        weights, winfo = fit_loss_weights(ModelReadyDataset(fit_eps, stage_cfg(hw)), hw, gamma=cfg.gamma, lambda_roll=cfg.lambda_roll,
                                           seed=cfg.seed, resid=cfg.lambda_resid, dec=cfg.lambda_dec, zero=cfg.lambda_zero, return_info=True)
         ptable = parameter_table(stats, model_cfg_of(cfg), dt0)
         log("parameter counts (B2/B4 matched to B3's total within ±10%; b4_rw = B3's residual width):\n"
