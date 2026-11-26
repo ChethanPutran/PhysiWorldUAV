@@ -20,6 +20,15 @@ import time
 from pathlib import Path
 
 
+def _notice(message: str, title: str, priority: str, tags: str) -> None:
+    """Phone notice through ntfy (physiworld_uav.notify); silent when not set up or when the package is not importable."""
+    try:
+        from physiworld_uav.notify import notify
+        notify(message, title=title, priority=priority, tags=tags)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--jobs", type=Path, required=True)
@@ -64,13 +73,18 @@ def main() -> int:
                 st[j["name"]].update(state="done" if rc == 0 else "failed", rc=rc, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                                      wall_s=time.time() - st[j["name"]]["t0"])
                 save()
+            if rc != 0:
+                _notice(f"A training run failed (exit code {rc})", "Training", "high", "x")
 
     ths = [threading.Thread(target=worker, args=(g,)) for g in a.gpus.split(",") for _ in range(a.per_gpu)]
     for t in ths:
         t.start(); time.sleep(2)                         # stagger the starts (dataset loading)
     for t in ths:
         t.join()
-    print("all jobs finished:", {k: sum(v["state"] == k for v in st.values()) for k in ("done", "failed")})
+    summary = {k: sum(v["state"] == k for v in st.values()) for k in ("done", "failed")}
+    print("all jobs finished:", summary)
+    _notice(f"Training sweep finished: {summary['done']} runs done, {summary['failed']} failed, of {len(st)}", "Training", "high" if summary["failed"] else "default",
+            "warning" if summary["failed"] else "white_check_mark")
     return 0
 
 

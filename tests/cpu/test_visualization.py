@@ -213,3 +213,22 @@ def test_cli_dispatch_and_help(capsys):
     assert "generation" in capsys.readouterr().out and set(COMMANDS) == {"generation", "report", "progress", "training", "plan", "wind"}
     with pytest.raises(SystemExit):
         main(["nonsense"])
+
+
+def test_training_dashboard_data_counts_jobs_and_reads_metrics(tmp_path):
+    import json
+    from physiworld_uav.visualization.live_training import PAGE, structured
+    sweep, exp = tmp_path / "sw", tmp_path / "exp"
+    sweep.mkdir(); (exp / "fx_v06_b3_s1").mkdir(parents=True)
+    (sweep / "status.json").write_text(json.dumps({
+        "fx_v06_b3_s1": {"state": "running", "model": "b3", "gpu": "0", "t0": 1.0},
+        "fx_v06_b4_s0": {"state": "queued", "model": "b4"},
+        "fx_v06_b2_s0": {"state": "done", "model": "b2", "gpu": "1", "t0": 1.0, "wall_s": 600.0}}))
+    row = {"epoch": 3, "horizon": 5, "epoch_s": 8.0, "windows_per_s": 3000.0, "metric": 0.05, "best_global": 0.04, "train": {"roll": 0.1, "total": 1.0},
+           "val": {"pos_rmse_m": {"1": 0.001}}}
+    (exp / "fx_v06_b3_s1" / "metrics.jsonl").write_text(json.dumps(row) + "\n")
+    d, _ = structured(sweep, exp, {})
+    assert d["counts"] == {"running": 1, "queued": 1, "done": 1, "failed": 0} and d["total"] == 3 and d["eta_s"] is not None and d["eta_s"] > 0
+    j = {x["name"]: x for x in d["jobs"]}
+    assert j["fx_v06_b3_s1"]["epoch"] == 1 and j["fx_v06_b3_s1"]["val"] == 0.05 and j["fx_v06_b3_s1"]["best"] == 0.04 and j["fx_v06_b4_s0"]["epoch"] == 0
+    assert "id=\"view-dash\"" in PAGE and "max-aspect-ratio" in PAGE and "id=\"view-curves\"" in PAGE         # dashboard, phone layout and the curves tab are in the page

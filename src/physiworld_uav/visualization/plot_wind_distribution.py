@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from physiworld_uav.data.dataset_builder import BuilderConfig, load_model_episodes
+from physiworld_uav.data.dataset_builder import BuilderConfig, dataset_decimation, load_model_episodes
 
 ROLES = ["train", "val_id", "test_id", "val_ood_magnitude", "test_ood_magnitude", "test_ood_direction", "test_ood_temporal",
          "test_ood_gust", "test_ood_physics", "test_ood_trajectory"]
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
     (a.out / "figures").mkdir(parents=True, exist_ok=True); (a.out / "tables").mkdir(exist_ok=True)
-    bcfg = BuilderConfig(decimation=4, history=10, horizon=20, obs_mode="instant")
+    bcfg = BuilderConfig(decimation=dataset_decimation(a.dataset), history=10, horizon=20, obs_mode="instant")
     data, rows = {}, []
     for role in ROLES:
         try:

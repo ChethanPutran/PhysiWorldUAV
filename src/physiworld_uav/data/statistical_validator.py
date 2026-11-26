@@ -506,12 +506,12 @@ def check_coverage(rows: Mapping[str, dict], episodes: Sequence, domain_cfg: Map
 # ------------------------------------------------------------------ driver and report
 def run_all(dataset_dir: str | Path, with_physics: bool = True) -> dict:
     import yaml
-    from physiworld_uav.data.dataset_builder import BuilderConfig, load_model_episodes
+    from physiworld_uav.data.dataset_builder import BuilderConfig, dataset_decimation, load_model_episodes
     dataset_dir = Path(dataset_dir)
     rows = {json.loads(l)["episode_id"]: json.loads(l) for l in (dataset_dir / "manifest.jsonl").read_text().splitlines() if l.strip()}
     index = json.loads((dataset_dir / "index.json").read_text())
     status = {e["episode_id"]: e.get("status", "?") for e in index["episodes"]}
-    episodes = load_model_episodes(dataset_dir, BuilderConfig())
+    episodes = load_model_episodes(dataset_dir, BuilderConfig(decimation=dataset_decimation(dataset_dir)))
     rows_w = {k: v for k, v in rows.items() if k in status}
     cfg_path = dataset_dir / "resolved_config.yaml"
     cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
@@ -562,9 +562,9 @@ def make_figures(r: dict, dataset_dir: Path, out: Path) -> list[str]:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from physiworld_uav.data.dataset_builder import BuilderConfig, load_model_episodes
+    from physiworld_uav.data.dataset_builder import BuilderConfig, dataset_decimation, load_model_episodes
     rows = {json.loads(l)["episode_id"]: json.loads(l) for l in (dataset_dir / "manifest.jsonl").read_text().splitlines() if l.strip()}
-    eps = load_model_episodes(dataset_dir, BuilderConfig())
+    eps = load_model_episodes(dataset_dir, BuilderConfig(decimation=dataset_decimation(dataset_dir)))
     fam = lambda role: "train" if role == "train" else ("id (val/test)" if role in ("val_id", "test_id") else ("physics_validation" if role == "physics_validation" else "ood"))  # noqa: E731
     groups = defaultdict(list)
     for e in eps:

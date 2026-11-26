@@ -6,12 +6,19 @@ error, progress every 20 minutes, completion. Quiet otherwise.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path as _P
+
+sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "src"))
+
 import argparse
 import glob
 import json
 import subprocess
 import time
 from pathlib import Path
+
+from physiworld_uav.notify import notify
 
 
 def alive(exp: str) -> int:
@@ -40,6 +47,7 @@ def main() -> None:
         for f in glob.glob("logs/gen_2*_w*.log"):
             if f not in seen_fatal and "Fatal Python error" in Path(f).read_text(errors="replace"):
                 seen_fatal.add(f); print(f"WORKER CRASH (fatal error): {f}", flush=True)
+                notify("A generation worker crashed (fatal error in its log)", title="Data generation", priority="high", tags="rotating_light")
         n_alive = alive(a.experiment)
         if n_alive != last_alive:
             print(f"workers running: {n_alive} of {a.workers}", flush=True); last_alive = n_alive
@@ -59,6 +67,7 @@ def main() -> None:
                 pass
         if n_alive == 0 and n > 0 and time.time() - t0 > 300 and not idx.exists():
             print(f"no worker running and no merged index yet ({n}/{total} written)", flush=True)
+            notify(f"No generation worker is running and the dataset is not complete ({n}/{total} episodes)", title="Data generation", priority="high", tags="warning")
             time.sleep(300)
         time.sleep(30)
 

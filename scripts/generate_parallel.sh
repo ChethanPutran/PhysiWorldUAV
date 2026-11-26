@@ -29,6 +29,7 @@ IFS=',' read -r -a GPU_LIST <<< "$GPUS"
 export HDF5_USE_FILE_LOCKING=FALSE OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 mkdir -p logs
 STAMP=$(date +%Y%m%d_%H%M%S)
+notice() { python -m physiworld_uav.notify "$1" --title "$2" --priority "$3" --tags "$4" >/dev/null 2>&1 || true; }    # phone notice (ntfy); silent if not set up
 python -m physiworld_uav.experiments.generate plan "$@" || exit 1          # writes manifest / config / provenance once
 last_written=-1
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
@@ -56,9 +57,10 @@ except Exception:
 PY
 )
   echo "[$(date +%T)] attempt $attempt: $status"
-  case "$status" in complete*) exit 0;; esac
+  case "$status" in complete*) notice "Generation finished: ${status#complete } episodes written and validated" "Data generation" default white_check_mark; exit 0;; esac
   written=${status#* }; written=${written%% *}
-  [ "$last_written" = "$written" ] && { echo "no progress since the previous attempt; stopping"; exit 1; }
+  [ "$last_written" = "$written" ] && { echo "no progress since the previous attempt; stopping"; notice "Generation stopped without finishing ($status)" "Data generation" high warning; exit 1; }
   last_written=$written
 done
+notice "Generation gave up after $MAX_ATTEMPTS attempts ($status)" "Data generation" high warning
 exit 1

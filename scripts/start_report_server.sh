@@ -8,7 +8,7 @@
 #
 # Both listen on 127.0.0.1 only (use an SSH tunnel:  ssh -L 3000:127.0.0.1:<port> user@server, then open http://localhost:3000/ for the
 # generation report or http://localhost:3000/live.html for the training page). --public binds 0.0.0.0 instead (no login, plain HTTP).
-# Closing your SSH session does not stop them. PID and port files: logs/report_<kind>.pid / .port, log: logs/report_<kind>.log.
+# They run in their own session (setsid), so closing your SSH session, VS Code or the Claude Code session does not stop them. PID and port files: logs/report_<kind>.pid / .port, log: logs/report_<kind>.log.
 # Details: src/physiworld_uav/visualization/README.md
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$REPO" || exit 1
@@ -24,7 +24,7 @@ case "$cmd" in
     while [ $# -gt 0 ]; do case "$1" in --port) port="$2"; shift 2;; --public) host=0.0.0.0; shift;; *) echo "unknown option $1"; exit 2;; esac; done
     running "$kind" && { echo "$kind server already running on port $(cat "$(portf "$kind")") (pid $(cat "$(pidf "$kind")")); stop it first"; exit 1; }
     if ss -ltn 2>/dev/null | grep -q ":$port "; then echo "port $port is already in use; pick another with --port (this is a shared server)"; exit 1; fi
-    PYTHONPATH="$REPO/src" nohup python3 -m physiworld_uav.visualization "$kind" $([ "$kind" = generation ] && echo "--dataset" || echo "--sweep") "$target" \
+    PYTHONPATH="$REPO/src" setsid nohup python3 -m physiworld_uav.visualization "$kind" $([ "$kind" = generation ] && echo "--dataset" || echo "--sweep") "$target" \
         --host "$host" --port "$port" > "logs/report_$kind.log" 2>&1 &
     echo $! > "$(pidf "$kind")"; echo "$port" > "$(portf "$kind")"; sleep 3
     if running "$kind"; then echo "$kind server started: http://$host:$port/$([ "$kind" = training ] && echo live.html)  (pid $(cat "$(pidf "$kind")"), log logs/report_$kind.log)"

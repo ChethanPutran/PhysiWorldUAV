@@ -70,3 +70,4 @@ if ! ss -ltn 2>/dev/null | grep -q ":$REPORT_PORT "; then
   say "dataset report page restarted on $REPORT_HOST:$REPORT_PORT"
 fi
 say "started; logs/gen_${EXPERIMENT}_boot_$STAMP.log"
+PYTHONPATH="$REPO/src" python3 -m physiworld_uav.notify "Server restarted: the unfinished generation was resumed" --title "Data generation" --priority high --tags arrows_counterclockwise >/dev/null 2>&1 || true
