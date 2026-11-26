@@ -31,6 +31,8 @@ ssh -L 3000:127.0.0.1:60193 <user>@<server>          # keep it open
 http://localhost:3000/                                # use http, not https
 ```
 
+The page has two views (tabs at the top right; `#dashboard` / `#report` in the URL): the **Dashboard**, which fits on one screen without scrolling (font and panel sizes follow the window height; checked at 1920x1080 and 1366x768), and **Plan & episodes**, the long report with the wind, vehicle and scenario charts and the filterable episode table. The Dashboard shows a progress bar (done / running / queued), ten tiles (done, running, queued, pending, failed, ended early, episodes per hour, time left, disk, CPU), the worker table, a chart of episodes written over time with a dashed projection to the finish, GPUs and host, progress by split role and the latest episodes. A static `report.html` (no server) opens on the report view.
+
 What the page shows (it polls every 5 s; the plan itself is embedded, so it works from the moment `plan` has run):
 
 * **Generation status**: episodes done / running now / queued / pending / failed / ended early, elapsed time, estimated time left; a worker table (GPU, done, queued, assigned, running episode); the latest finished episodes; the *Status* column and filter of the episode table.

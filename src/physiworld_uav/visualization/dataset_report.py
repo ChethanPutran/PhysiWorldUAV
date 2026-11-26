@@ -170,6 +170,8 @@ def live_states(manifest: list[dict], done: set[str], failed: set[str], alive: d
 _PREV: dict[int, tuple[float, float]] = {}                      # pid -> (time, cpu ticks) of the previous sample, for the CPU %
 _HIST: dict[int, list[tuple[float, int]]] = {}                  # worker -> [(time, episodes written)], for the per-worker rate
 _TICKS = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+_GH: dict[str, list] = {}                                       # dataset dir -> [[time, episodes written], ...] for the "episodes over time" chart
+_GH_SAVED: dict[str, float] = {}
 
 
 def _smi(args: list[str]) -> list[list[str]]:
@@ -264,6 +266,21 @@ def resource_stats(dataset_dir: Path) -> dict:
         if f.name.startswith("shard_w"):
             w = int(f.name[7:9]); wbytes[w] = wbytes.get(w, 0) + sz
     n_done = sum(done.values())
+    hist_file = d / "report_history.json"                                  # survives a restart of the server
+    gh = _GH.setdefault(str(d), [])
+    if not gh and hist_file.exists():
+        try:
+            gh.extend(json.loads(hist_file.read_text()))
+        except (OSError, json.JSONDecodeError):
+            pass
+    if not gh or gh[-1][1] != n_done or now - gh[-1][0] > 60:
+        gh.append([now, n_done])
+        del gh[:-3000]
+        if now - _GH_SAVED.get(str(d), 0) > 30:
+            try:
+                hist_file.write_text(json.dumps(gh)); _GH_SAVED[str(d)] = now
+            except OSError:
+                pass
     # GPUs
     gpus = []
     for r in _smi(["--query-gpu=index,pci.bus_id,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw"]):
@@ -316,7 +333,7 @@ def resource_stats(dataset_dir: Path) -> dict:
             "host": {"cores": os.cpu_count(), "load1": os.getloadavg()[0], "load5": os.getloadavg()[1], "load15": os.getloadavg()[2],
                      "ram_total_gb": meminfo.get("MemTotal"), "ram_available_gb": meminfo.get("MemAvailable")},
             "ours": {"workers_alive": sum(1 for x in workers if x["alive"]), "ram_gb": our_ram, "cpu_cores": our_cores if our_cores else None},
-            "gpus": gpus, "workers": workers}
+            "gpus": gpus, "workers": workers, "history": gh[-2000:]}
 
 
 def combined_index(dataset_dir: Path) -> tuple[bytes, float] | None:
