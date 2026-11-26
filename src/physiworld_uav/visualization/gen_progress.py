@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Progress and ETA of a parallel generation (reads the per-worker index files of the dataset directory). Run on the host or in the container.
 
-    python3 scripts/gen_progress.py data/datasets/physiworld_pilot_v7_v0.7.0 [--total 4530] [--watch 60]
+    python3 -m physiworld_uav.visualization progress data/datasets/physiworld_pilot_v7_v0.7.0 [--total 4530] [--watch 60]
 """
 from __future__ import annotations
 
@@ -22,10 +21,10 @@ def snapshot(d: Path, total: int) -> tuple[int, dict]:
     return n, per
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("dataset", type=Path); ap.add_argument("--total", type=int, default=0); ap.add_argument("--watch", type=float, default=0)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     total = a.total or sum(1 for _ in (a.dataset / "manifest.jsonl").open())
     t0, n0 = time.time(), None
     while True:

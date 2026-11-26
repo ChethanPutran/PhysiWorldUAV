@@ -171,3 +171,45 @@ def test_live_states_follow_the_generators_assignment_and_order():
     st2 = live_states(rows, done, set(), {0: 4, 1: 4, 2: 4})                             # worker 3 is gone: its episodes are neither running nor queued
     assert all(w["queued"] == 0 and w["current"] is None for w in st2["workers"] if w["worker"] == 3)
     assert live_states(rows, set(), set(), {})["running"] == []                          # no live worker: everything is pending
+
+
+def test_resource_stats_reports_disk_and_workers_without_gpus(tmp_path):
+    import json
+    from physiworld_uav.visualization.dataset_report import resource_stats
+    (tmp_path / "manifest.jsonl").write_text("\n".join(json.dumps({"episode_id": f"e{i}", "experiment_id": "x"}) for i in range(20)) + "\n")
+    (tmp_path / "index.worker00.json").write_text(json.dumps({"episodes": [f"e{i}" for i in range(12)], "failures": [], "in_progress": True}))
+    (tmp_path / "shard_w00_000.h5").write_bytes(b"0" * 1_200_000)
+    st = resource_stats(tmp_path)
+    assert st["total"] == 20 and st["written"] == 12
+    assert abs(st["disk"]["shards_gb"] - 0.0012) < 1e-9 and abs(st["disk"]["per_episode_mb"] - 0.1) < 1e-9
+    assert abs(st["disk"]["projected_total_gb"] * 1e9 - (0.1e6 * 20 + st["disk"]["other_mb"] * 1e6)) < 1e3 and st["disk"]["volume_free_gb"] > 0
+    assert st["host"]["cores"] and st["ours"]["workers_alive"] == 0                       # no generator process for experiment "x"
+    assert st["workers"][0]["worker"] == 0 and st["workers"][0]["episodes"] == 12 and st["workers"][0]["alive"] is False
+
+
+def test_episode_progress_is_exact_with_a_progress_file_and_estimated_without(tmp_path):
+    import json
+    import os
+    import time
+    from physiworld_uav.visualization.dataset_report import _episode_progress
+    now = time.time()
+    (tmp_path / "index.worker00.json").write_text(json.dumps({"episodes": ["a", "b"]}))
+    os.utime(tmp_path / "index.worker00.json", (now - 60, now - 60))                       # last episode finished 60 s ago
+    est = _episode_progress(tmp_path, 0, 123, 2, 60.0, 10, now)                             # 60 episodes per hour -> typical 60 s
+    assert est["ep_exact"] is False and abs(est["ep_elapsed_s"] - 60) < 1 and abs(est["ep_typical_s"] - 60) < 1e-6 and est["ep_pct"] == 99.0   # capped below 100
+    (tmp_path / "progress.worker00.json").write_text(json.dumps({"episode_id": "c", "step": 1000, "n_steps": 2000, "t_start": now - 30, "updated": now - 1,
+                                                                 "mean_episode_s": 80.0}))
+    ex = _episode_progress(tmp_path, 0, 123, 2, 60.0, 10, now)
+    assert ex["ep_exact"] is True and ex["ep_id"] == "c" and ex["ep_step"] == 100 and ex["ep_steps"] == 200
+    assert abs(ex["ep_pct"] - 50.0) < 1e-9 and abs(ex["ep_elapsed_s"] - 30) < 1 and ex["ep_typical_s"] == 80.0
+    (tmp_path / "progress.worker00.json").write_text(json.dumps({"episode_id": "c", "step": 1000, "n_steps": 2000, "t_start": now - 300, "updated": now - 100}))
+    assert _episode_progress(tmp_path, 0, 123, 2, 60.0, 10, now)["ep_exact"] is False       # stale progress file: not trusted while the worker is alive
+
+
+def test_cli_dispatch_and_help(capsys):
+    import pytest
+    from physiworld_uav.visualization.cli import COMMANDS, main
+    main(["--help"])
+    assert "generation" in capsys.readouterr().out and set(COMMANDS) == {"generation", "report", "progress", "training", "plan", "wind"}
+    with pytest.raises(SystemExit):
+        main(["nonsense"])

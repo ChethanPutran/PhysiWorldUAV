@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -165,6 +167,158 @@ def live_states(manifest: list[dict], done: set[str], failed: set[str], alive: d
     return {"running": running, "queued": queued, "workers": workers}
 
 
+_PREV: dict[int, tuple[float, float]] = {}                      # pid -> (time, cpu ticks) of the previous sample, for the CPU %
+_HIST: dict[int, list[tuple[float, int]]] = {}                  # worker -> [(time, episodes written)], for the per-worker rate
+_TICKS = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+
+
+def _smi(args: list[str]) -> list[list[str]]:
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", *args, "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    return [[c.strip() for c in l.split(",")] for l in out.strip().splitlines() if l.strip()]
+
+
+def worker_pids(experiment_id: str) -> dict[int, int]:
+    """{worker index: host pid} of the running generator processes of this experiment (the python process, not a wrapping shell)."""
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:  # noqa: BLE001
+        return {}
+    found: dict[int, int] = {}
+    for line in out.splitlines():
+        if "generate run" in line and "--shard" in line and f"experiment={experiment_id}" in line:
+            parts = line.split(None, 2)
+            if len(parts) < 3 or parts[1].endswith(("bash", "sh", "timeout")):
+                continue
+            try:
+                found[int(line.split("--shard")[1].split()[0].split("/")[0])] = int(parts[0])
+            except (IndexError, ValueError):
+                continue
+    return found
+
+
+def _proc(pid: int) -> dict | None:
+    try:
+        st = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        rss = 0.0
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmRSS"):
+                rss = float(line.split()[1]) / 1048576
+        btime = next((float(l.split()[1]) for l in Path("/proc/stat").read_text().splitlines() if l.startswith("btime")), None)
+        started = btime + float(st[19]) / _TICKS if btime else None                       # process start time (epoch seconds)
+        return {"ticks": float(st[11]) + float(st[12]), "threads": int(st[17]), "rss_gb": rss, "started": started}
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _episode_progress(d: Path, w: int, pid: int | None, n_done: int, rate_per_h: float | None, D: int, now: float, started: float | None = None) -> dict:
+    """What the worker is doing right now: the episode, the model step reached out of the planned steps, the time spent on it and the typical time.
+    Exact when the worker writes ``progress.workerNN.json`` (generators started after 2026-11-26); otherwise estimated from when its index file was
+    last written (= when it finished its previous episode) and the mean time per episode, flagged ``exact: false``."""
+    out = {"ep_id": None, "ep_step": None, "ep_steps": None, "ep_elapsed_s": None, "ep_typical_s": None, "ep_pct": None, "ep_exact": False}
+    pf, ix = d / f"progress.worker{w:02d}.json", d / f"index.worker{w:02d}.json"
+    prog = None
+    try:
+        prog = json.loads(pf.read_text())
+        if now - float(prog.get("updated", 0)) > 20 and pid:                  # stale (the worker is in start-up or between episodes): do not trust the step
+            prog = prog if prog.get("step") == prog.get("n_steps") else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        prog = None
+    typical = (prog or {}).get("mean_episode_s") or (3600.0 / rate_per_h if rate_per_h else None)
+    if typical is None and started and n_done:                                  # no recent rate yet: lifetime average (includes the start-up, so a little high)
+        typical = max(now - started, 1.0) / n_done
+    if prog and prog.get("step") is not None and pid and prog.get("step") < prog.get("n_steps", 0):
+        out.update(ep_id=prog.get("episode_id"), ep_step=int(prog["step"] // D), ep_steps=int(prog["n_steps"] // D), ep_exact=True,
+                   ep_elapsed_s=max(0.0, now - float(prog.get("t_start", now))), ep_typical_s=typical,
+                   ep_pct=100.0 * prog["step"] / max(prog["n_steps"], 1))
+        return out
+    try:
+        since = max(0.0, now - ix.stat().st_mtime) if n_done else None
+    except OSError:
+        since = None
+    out.update(ep_elapsed_s=since, ep_typical_s=typical, ep_pct=min(99.0, 100.0 * since / typical) if since is not None and typical else None)
+    return out
+
+
+def resource_stats(dataset_dir: Path) -> dict:
+    """CPU, memory, disk and GPU figures for the live page: host totals, our workers (per worker: pid, threads, RAM, CPU %, GPU memory,
+    episodes written, shard bytes, episodes per hour) and the projected size of the finished dataset. Read from /proc, ``nvidia-smi`` and the
+    dataset directory; no extra dependencies."""
+    d = Path(dataset_dir); now = time.time()
+    man_rows = [json.loads(l) for l in (d / "manifest.jsonl").read_text().splitlines() if l.strip()]
+    total = len(man_rows); exp = man_rows[0].get("experiment_id", "") if man_rows else ""
+    D = int(man_rows[0].get("sim", {}).get("control_decimation", 1)) if man_rows else 1
+    # episodes and shard bytes per worker
+    done: dict[int, int] = {}; wbytes: dict[int, int] = {}; allbytes = 0
+    for f in d.glob("index.worker*.json"):
+        try:
+            w = int(f.stem.split("worker")[-1]); done[w] = len(json.loads(f.read_text()).get("episodes", []))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    for f in d.glob("shard_*.h5"):
+        sz = f.stat().st_size; allbytes += sz
+        if f.name.startswith("shard_w"):
+            w = int(f.name[7:9]); wbytes[w] = wbytes.get(w, 0) + sz
+    n_done = sum(done.values())
+    # GPUs
+    gpus = []
+    for r in _smi(["--query-gpu=index,pci.bus_id,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw"]):
+        gpus.append({"index": int(r[0]), "bus": r[1].lower()[-12:], "util": float(r[2]), "mem_used_mb": float(r[3]), "mem_total_mb": float(r[4]),
+                     "temp_c": float(r[5]) if r[5].replace(".", "").isdigit() else None, "power_w": float(r[6]) if r[6].replace(".", "").isdigit() else None})
+    bus2idx = {g["bus"]: g["index"] for g in gpus}
+    gpu_mem: dict[int, dict[int, float]] = {}                                  # pid -> {gpu index: MB}
+    for r in _smi(["--query-compute-apps=pid,used_memory,gpu_bus_id"]):
+        try:
+            gpu_mem.setdefault(int(r[0]), {})[bus2idx.get(r[2].lower()[-12:], -1)] = float(r[1])
+        except (ValueError, IndexError):
+            continue
+    # workers
+    pids = worker_pids(exp); workers = []; our_cores = 0.0; our_ram = 0.0
+    for w in sorted(set(done) | set(pids)):
+        pid = pids.get(w); pr = _proc(pid) if pid else None
+        cpu = None
+        if pr:
+            prev = _PREV.get(pid)
+            if prev and now > prev[0] + 1:
+                cpu = 100.0 * (pr["ticks"] - prev[1]) / _TICKS / (now - prev[0])
+            _PREV[pid] = (now, pr["ticks"])
+            our_ram += pr["rss_gb"]
+            if cpu is not None:
+                our_cores += cpu / 100
+        h = _HIST.setdefault(w, []); n = done.get(w, 0)
+        if not h or h[-1][1] != n or now - h[-1][0] > 120:
+            h.append((now, n))
+        del h[:-400]
+        rec = [x for x in h if x[0] >= now - 900]
+        rate = (rec[-1][1] - rec[0][1]) / max(rec[-1][0] - rec[0][0], 1) * 3600 if len(rec) > 1 and rec[-1][0] - rec[0][0] > 120 else None
+        gm = gpu_mem.get(pid, {}) if pid else {}
+        own = max(gm, key=gm.get) if gm else None                            # the GPU it computes on (it also holds small graphics contexts on the others)
+        ep = _episode_progress(d, w, pid, n, rate, D, now, pr["started"] if pr else None)
+        workers.append({**ep, "worker": w, "pid": pid, "alive": bool(pr), "threads": pr["threads"] if pr else None, "rss_gb": pr["rss_gb"] if pr else None,
+                        "cpu_pct": cpu, "gpu": own, "gpu_mem_mb": gm.get(own) if own is not None else None, "gpu_mem_all_mb": sum(gm.values()) if gm else None,
+                        "episodes": n, "disk_mb": wbytes.get(w, 0) / 1e6, "rate_per_h": rate})
+    meminfo = {}
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            k, v = line.split(":", 1); meminfo[k] = float(v.split()[0]) / 1048576
+    except OSError:
+        pass
+    other = sum(f.stat().st_size for f in d.iterdir() if f.is_file() and f.suffix != ".h5")
+    per_ep = allbytes / n_done if n_done >= 10 else None
+    du = shutil.disk_usage(d)
+    return {"time": time.strftime("%H:%M:%S"), "dataset": d.name, "total": total, "written": n_done,
+            "disk": {"shards_gb": allbytes / 1e9, "other_mb": other / 1e6, "per_episode_mb": per_ep / 1e6 if per_ep else None,
+                     "projected_total_gb": (per_ep * total + other) / 1e9 if per_ep else None, "volume_free_gb": du.free / 1e9, "volume_total_gb": du.total / 1e9},
+            "host": {"cores": os.cpu_count(), "load1": os.getloadavg()[0], "load5": os.getloadavg()[1], "load15": os.getloadavg()[2],
+                     "ram_total_gb": meminfo.get("MemTotal"), "ram_available_gb": meminfo.get("MemAvailable")},
+            "ours": {"workers_alive": sum(1 for x in workers if x["alive"]), "ram_gb": our_ram, "cpu_cores": our_cores if our_cores else None},
+            "gpus": gpus, "workers": workers}
+
+
 def combined_index(dataset_dir: Path) -> tuple[bytes, float] | None:
     """The live ``/index.json``: the merged ``index.json`` when it exists and is complete; otherwise (a parallel generation has no
     ``index.json`` until its merge) one assembled from the per-worker ``index.workerNN.json`` files. Returns (body, age in seconds)."""
@@ -229,6 +383,11 @@ def make_handler(dataset_dir: Path):
                     self._send(200, build_report(dataset_dir, live=True).encode("utf-8"), "text/html; charset=utf-8")
                 except Exception as exc:  # noqa: BLE001
                     self._send(500, f"could not build the report: {exc}".encode(), "text/plain; charset=utf-8")
+            elif path == "/stats.json":
+                try:
+                    self._send(200, json.dumps(resource_stats(dataset_dir)).encode(), "application/json")
+                except Exception as exc:  # noqa: BLE001
+                    self._send(500, json.dumps({"error": str(exc)}).encode(), "application/json")
             elif path == "/index.json":
                 got = combined_index(dataset_dir)
                 if got is not None:

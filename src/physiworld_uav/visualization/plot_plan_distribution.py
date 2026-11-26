@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Distribution plots of a planned or generated dataset, from its manifest only (no simulation, no HDF5).
 
-    python scripts/plot_plan_distribution.py --dataset data/datasets/physiworld_pilot_v7_v0.7.0 --out outputs/reports/data_distribution_v7
+    python -m physiworld_uav.visualization plan --dataset data/datasets/physiworld_pilot_v7_v0.7.0 --out outputs/reports/data_distribution_v7
 
 Figures: 1 sizes per role; 2 wind speed (mean and peak per episode, by role group, with the ID / OOD limits) and direction; 3 vehicle
 (domain) factors, ID against OOD roles, one point per distinct vehicle; 4 scenarios, data type, wind profile and counterfactual modes;
@@ -30,13 +29,13 @@ for lab, roles, col in GROUPS:
         ROLE_COL[r] = col
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--id-peak-limit", type=float, default=6.2)
     ap.add_argument("--ood-peak-limit", type=float, default=9.0)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     (a.out / "figures").mkdir(parents=True, exist_ok=True); (a.out / "tables").mkdir(exist_ok=True)
     rows = [json.loads(l) for l in (a.dataset / "manifest.jsonl").read_text().splitlines() if l.strip()]
     sim = rows[0]["sim"]; dec = int(sim["control_decimation"]); mdt = float(sim["model_dt"])

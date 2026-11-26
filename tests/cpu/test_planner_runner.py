@@ -462,3 +462,30 @@ def test_first_imu_sample_is_the_analytic_rest_value_not_the_sensor_read():
                   [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
     assert np.allclose(arrays["observations/imu_accel_B"][0], R.T @ np.array([0, 0, G]), atol=1e-5)
     assert np.allclose(arrays["observations/imu_gyro_B"][0], 0.0) and bool(arrays["observations/imu_valid"][0])
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_runner_reports_progress_every_control_interval():
+    cfg = to_plain(compose(["experiment=smoke"]))
+    row = plan_dataset(cfg).episodes[0]
+    nominal = DroneParams.from_dict(cfg["drone"])
+    seen = []
+    arrays, meta = run_episode(MockSim(nominal, cfg["physics"]["dt"]), row, nominal, termination=Termination(), config_hash="h", dataset_version="0",
+                               progress=lambda k, n: seen.append((k, n)))
+    D = row["sim"]["control_decimation"]
+    assert [k for k, _ in seen] == list(range(0, meta.n_steps, D)) and {n for _, n in seen} == {meta.n_steps}
+
+
+@pytest.mark.skipif(not omni_drones_available(), reason="omni_drones not importable")
+def test_worker_writes_a_progress_file(tmp_path, monkeypatch):
+    def fake_make_sim(phys, first):
+        return _ClosableMock(DroneParams.from_dict(to_plain(compose(["experiment=smoke"]))["drone"]), phys["dt"])
+    monkeypatch.setattr(G, "_make_sim", fake_make_sim)
+    monkeypatch.setattr(G, "_sim_settings", lambda sim: {})
+    cfg = compose(["experiment=smoke", "experiment.parts.0.n_groups=2", "experiment.dataset_version=prog", f"dataset.output_root={tmp_path}"])
+    out = G.dataset_dir(to_plain(cfg))
+    G.run(cfg, shard=(0, 1)) if False else G.run(cfg, shard=(0, 2))
+    pf = out / "progress.worker00.json"
+    assert pf.exists() and not list(out.glob("progress*.tmp"))
+    d = json.loads(pf.read_text())
+    assert d["worker"] == 0 and d["episode_id"] and d["n_steps"] > 0 and 0 <= d["step"] <= d["n_steps"] and d["episodes_timed"] >= 1 and d["mean_episode_s"] is not None

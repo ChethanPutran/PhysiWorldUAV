@@ -143,6 +143,43 @@ def worker_rows(rows: Sequence[dict[str, Any]], worker: int, n_workers: int) -> 
     return [r for r in rows if owner[group_key(r)] == worker]
 
 
+class _ProgressWriter:
+    """Writes ``progress.workerNN.json`` (or ``progress.json`` without shards) next to the shards while an episode runs, at most once per second:
+    the episode id, the physics step reached, the planned steps, when the episode started and how long the previous ones took. The live report
+    page reads it. Failures to write are ignored (progress is cosmetic)."""
+
+    def __init__(self, out: Path, shard: tuple[int, int] | None) -> None:
+        self.path = out / (f"progress.worker{shard[0]:02d}.json" if shard else "progress.json")
+        self.worker = shard[0] if shard else None
+        self.eid, self.t0, self.last, self.durations, self.n_steps = "", 0.0, 0.0, [], 0
+
+    def start(self, eid: str, n_steps: int) -> None:
+        self.eid, self.t0, self.last, self.n_steps = eid, time.time(), 0.0, n_steps
+        self._write(0, n_steps)
+
+    def finish(self) -> None:
+        """The episode is written: record its duration and a final record (step = n_steps) until the next one starts."""
+        if self.eid:
+            self.durations.append(time.time() - self.t0)
+            self._write(self.n_steps, self.n_steps)
+
+    def __call__(self, step: int, n_steps: int) -> None:
+        if time.time() - self.last >= 1.0 or step == 0:
+            self._write(step, n_steps)
+
+    def _write(self, step: int, n_steps: int) -> None:
+        self.last = time.time()
+        try:
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"worker": self.worker, "episode_id": self.eid, "step": int(step), "n_steps": int(n_steps), "t_start": self.t0,
+                                       "updated": self.last, "episodes_timed": len(self.durations),
+                                       "last_episode_s": self.durations[-1] if self.durations else None,
+                                       "mean_episode_s": sum(self.durations) / len(self.durations) if self.durations else None}))
+            tmp.replace(self.path)
+        except OSError:
+            pass
+
+
 def shard_prefix(shard: tuple[int, int] | None) -> str:
     return "shard_" if shard is None or shard[1] == 1 else f"shard_w{shard[0]:02d}_"
 
@@ -232,6 +269,7 @@ def run(cfg_dc, *, limit: int | None = None, episodes: Sequence[str] | None = No
     settings = _sim_settings(sim)
     failures: list[dict[str, Any]] = []
     t0 = time.time()
+    progress = _ProgressWriter(out, shard)
 
     def checkpoint() -> None:
         if shard is not None:
@@ -250,11 +288,14 @@ def run(cfg_dc, *, limit: int | None = None, episodes: Sequence[str] | None = No
                     base_arrays, _ = read_episode(out / where[row["replay_of"]], row["replay_of"])
                     D = int(row["sim"]["control_decimation"])
                     replay = base_arrays["actions/rotor_cmd"][::D]
+                progress.start(row["episode_id"], int(row["n_steps"]))
                 arrays, meta = run_episode(sim, row, nominal, termination=term,
                                            config_hash=prov["config_hash"],
                                            dataset_version=manifest.dataset_version,
                                            replay_commands=replay, sim_settings=settings,
-                                           allow_unvalidated_forces=allow_unvalidated_forces)
+                                           allow_unvalidated_forces=allow_unvalidated_forces,
+                                           progress=progress)
+                progress.finish()
             except Exception as exc:                    # one bad episode must not end the run
                 tb = traceback.format_exc()
                 log.error("[%d/%d] %s FAILED: %s: %s\n%s", i + 1, len(rows), row["episode_id"],

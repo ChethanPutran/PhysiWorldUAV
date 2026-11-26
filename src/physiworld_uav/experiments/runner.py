@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol
+from typing import Callable, Any, Mapping, Protocol
 
 import numpy as np
 import torch
@@ -112,7 +112,10 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
                 replay_commands: np.ndarray | None = None, enforce_guards: bool = True,
                 allow_unvalidated_forces: bool = False,
                 sim_settings: Mapping[str, Any] | None = None,
+                progress: Callable[[int, int], None] | None = None,
                 ) -> tuple[dict[str, np.ndarray], EpisodeMetadata]:
+    """``progress(step, n_steps)``, when given, is called at the start of every control interval (physics steps done, planned physics steps);
+    it must be cheap and must not raise (the generator uses it to write a progress file for the live page)."""
     if enforce_guards:
         check_guards(plan, allow_unvalidated=allow_unvalidated_forces)
     dev = sim.device
@@ -261,6 +264,8 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
         t = k * dt
         if k % D == 0:
             j = k // D
+            if progress is not None:
+                progress(k, n_steps)
             if mode == "position":
                 rp = ref.at(t)
                 out = law.position(state, [rp])

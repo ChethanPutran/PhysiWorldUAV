@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
 """Live view of a training sweep: progress, timing, CPU, GPU and memory per run (stdlib only). Run on the HOST.
 
-    python3 scripts/live_monitor.py --sweep outputs/sweeps/fix_v1            # refresh every 5 s, Ctrl-C to stop
-    python3 scripts/live_monitor.py --sweep outputs/sweeps/fix_v1 --once      # print once (also for logs / pasting)
-    python3 scripts/live_monitor.py --sweep outputs/sweeps/fix_v1 --html live.html   # a page that reloads itself every refresh
+    python3 -m physiworld_uav.visualization.live_training --sweep outputs/sweeps/fix_v1            # refresh every 5 s, Ctrl-C to stop
+    python3 -m physiworld_uav.visualization.live_training --sweep outputs/sweeps/fix_v1 --once      # print once (also for logs / pasting)
+    python3 -m physiworld_uav.visualization.live_training --sweep outputs/sweeps/fix_v1 --serve --port 60194   # live page with charts (writer + web server in one process)
 
 In-place refresh needs a real terminal (ssh, tmux, a normal shell): the screen is cleared with ANSI codes. Where the output is not
 a terminal (Claude Code's `!` panel, a pipe, a file) every refresh would be appended, so the script then refuses to loop and tells
@@ -224,14 +223,37 @@ async function tick(){try{DATA=await (await fetch("live.json?"+Date.now())).json
 </script>"""
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sweep", type=Path, required=True)
     ap.add_argument("--exp-root", type=Path, default=Path("outputs/experiments"))
     ap.add_argument("--interval", type=float, default=5.0)
     ap.add_argument("--once", action="store_true")
-    ap.add_argument("--html", type=Path, help="write the table to this HTML file every interval (auto-reloading page) instead of printing")
-    a = ap.parse_args()
+    ap.add_argument("--html", type=Path, help="write the page (live.html + live.json) to this file every interval instead of printing")
+    ap.add_argument("--serve", action="store_true", help="write the page into the sweep folder AND serve that folder over HTTP (one process); open /live.html")
+    ap.add_argument("--host", default="127.0.0.1", help="bind address for --serve (default: local only; reach it through an SSH tunnel)")
+    ap.add_argument("--port", type=int, default=60194, help="port for --serve (0 picks a free one; this is a shared server)")
+    a = ap.parse_args(argv)
+    if a.serve:
+        import functools
+        import threading
+        from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+        page = a.sweep / "live.html"
+        threading.Thread(target=main, args=(["--sweep", str(a.sweep), "--exp-root", str(a.exp_root), "--interval", str(a.interval), "--html", str(page)],), daemon=True).start()
+        class Quiet(SimpleHTTPRequestHandler):
+            def log_message(self, *args, **kw) -> None:                      # keep the terminal quiet
+                pass
+
+        handler = functools.partial(Quiet, directory=str(a.sweep))
+        srv = ThreadingHTTPServer((a.host, a.port), handler)
+        print(f"serving {a.sweep} at http://{a.host}:{srv.server_address[1]}/live.html  (Ctrl+C to stop)", flush=True)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            srv.server_close()
+        return
     prev: dict = {}
     if a.once:                                           # two samples 2 s apart so the CPU % is defined
         _, prev = render(a.sweep, a.exp_root, prev); time.sleep(2)
@@ -252,7 +274,7 @@ def main() -> None:
             return
     if not sys.stdout.isatty():
         print("stdout is not a terminal: an in-place refresh is impossible here (each refresh would be appended).\n"
-              "Run this in a real terminal, or use  --html live.html  (open it in a browser / the IDE), or  watch -n 5 'python3 scripts/live_monitor.py --sweep "
+              "Run this in a real terminal, or use  --html live.html  (open it in a browser / the IDE), or  watch -n 5 'python3 -m physiworld_uav.visualization.live_training --sweep "
               f"{a.sweep} --once'.\n")
         print(render(a.sweep, a.exp_root, prev)[0]); return
     try:

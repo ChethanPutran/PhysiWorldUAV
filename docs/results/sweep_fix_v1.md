@@ -151,7 +151,7 @@ Total torque (body frame), R² of h at k = 0, B3 base seed 0: val ID 0.77, test 
 
 ## 6. Wind distribution of the pilot (v0.6.0; the v0.5.0 plan is identical)
 
-`scripts/plot_wind_distribution.py`; figures `outputs/reports/wind_distribution/figures/wind_speed_per_timestep.png` and `wind_per_episode.png`, table `tables/wind_by_role.csv`. Wind speed = |wind_applied_W| at the model rate. Both pilots use the original regimes (`wind_regime: id` and `ood_magnitude`); the wider ID range of Option C (`id_wide`, peak ≤ 6 m/s) was a candidate and has not been adopted.
+`python -m physiworld_uav.visualization wind` (`visualization/plot_wind_distribution.py`); figures `outputs/reports/wind_distribution/figures/wind_speed_per_timestep.png` and `wind_per_episode.png`, table `tables/wind_by_role.csv`. Wind speed = |wind_applied_W| at the model rate. Both pilots use the original regimes (`wind_regime: id` and `ood_magnitude`); the wider ID range of Option C (`id_wide`, peak ≤ 6 m/s) was a candidate and has not been adopted.
 
 | role | episodes | time steps | frac <0.1 m/s | frac <1 m/s | frac >3 m/s | frac >6 m/s | frac >8 m/s | p50 | p90 | p99 | max | episodes with no wind |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

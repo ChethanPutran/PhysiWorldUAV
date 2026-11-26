@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
-"""Distribution of the wind in a dataset: per time step, per episode, per role. Run INSIDE the container.
+"""Distribution of the wind in a dataset: per time step, per episode, per role. Run INSIDE the container (needs numpy, matplotlib, h5py).
 
-    python scripts/plot_wind_distribution.py --dataset data/datasets/physiworld_pilot_v0.6.0 --out outputs/reports/wind_distribution
+    python -m physiworld_uav.visualization wind --dataset data/datasets/physiworld_pilot_v0.6.0 --out outputs/reports/wind_distribution
 
 Wind = environment/wind_applied_W (world frame, m/s) at the model rate (50 Hz). Writes figures/*.png and tables/*.csv."""
 from __future__ import annotations
@@ -23,11 +22,11 @@ PAL = {"train": "#0072B2", "val_id": "#56B4E9", "test_id": "#009E73", "val_ood_m
        "test_ood_direction": "#CC79A7", "test_ood_temporal": "#888888", "test_ood_gust": "#B8860B", "test_ood_physics": "#7B4EA3", "test_ood_trajectory": "#444444"}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     (a.out / "figures").mkdir(parents=True, exist_ok=True); (a.out / "tables").mkdir(exist_ok=True)
     bcfg = BuilderConfig(decimation=4, history=10, horizon=20, obs_mode="instant")
     data, rows = {}, []

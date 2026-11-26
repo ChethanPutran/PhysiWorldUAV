@@ -6,7 +6,7 @@
 jobs.json: a list of {"name", "dataset", "model", "configs": [yaml...], "sets": ["key=value"...]}. A job whose
 outputs/experiments/<name>/summary.json already exists is skipped (so the script can be restarted). Output of each job:
 logs/train_<name>.log; the state of all jobs is kept in <jobs dir>/status.json (queued / running / done / failed, GPU, times),
-which scripts/live_monitor.py reads.
+which physiworld_uav.visualization.live_training (the live training page) reads.
 """
 from __future__ import annotations
 

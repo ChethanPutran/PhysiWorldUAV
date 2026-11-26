@@ -63,6 +63,10 @@ select:focus-visible,input:focus-visible{outline:2px solid var(--c-id);outline-o
     <div class="kpis" id="lv-kpis"></div>
     <p class="note" id="lv-note" style="margin:10px 0 0"></p>
     <div class="scroll" style="margin-top:8px"><table id="lv-workers"></table></div>
+    <h2 style="margin-top:18px">Resources <span class="badge" id="rs-time"></span></h2>
+    <div class="kpis" id="rs-kpis"></div>
+    <div class="scroll" style="margin-top:8px"><table id="rs-gpus"></table></div>
+    <div class="scroll" style="margin-top:8px"><table id="rs-workers"></table></div>
     <div class="scroll" style="margin-top:8px"><table id="lv-recent"></table></div>
   </section>
 
@@ -259,7 +263,22 @@ async function poll(){
   }catch(e){$('#live').hidden=false;$('#lv-state').textContent='server not reachable'}
   clearTimeout(LIVE_TIMER);LIVE_TIMER=setTimeout(poll,again?5000:30000);
 }
+function applyStats(s){
+  const f=(v,d=1)=>v==null||!isFinite(v)?'—':(+v).toFixed(d), gb=v=>f(v,2)+' GB';
+  $('#rs-time').textContent='updated '+s.time;
+  const dk=s.disk,ho=s.host,ou=s.ours;
+  $('#rs-kpis').innerHTML=[[gb(dk.shards_gb),'dataset on disk (shards)'],[dk.projected_total_gb?gb(dk.projected_total_gb):'—','projected total at '+f(dk.per_episode_mb,2)+' MB / episode'],[f(dk.volume_free_gb,0)+' GB','free on the data volume (of '+f(dk.volume_total_gb,0)+')'],
+   [f(ou.cpu_cores,1),'CPU cores busy (our workers)'],[f(ho.load1,0),'host load average (1 min), '+ho.cores+' cores'],[gb(ou.ram_gb),'RAM, our workers'],[f(ho.ram_available_gb,0)+' GB','RAM available on the host (of '+f(ho.ram_total_gb,0)+')']].map(([b,t])=>`<div class="kpi"><b>${b}</b><span>${t}</span></div>`).join('');
+  $('#rs-gpus').innerHTML='<tr><th>GPU</th><th>Utilisation</th><th>Memory used</th><th>Temperature</th><th>Power</th><th>Our workers</th></tr>'+s.gpus.map(g=>{const ws=s.workers.filter(w=>w.gpu===g.index);return `<tr><td>${g.index}</td><td>${f(g.util,0)} %</td><td>${f(g.mem_used_mb/1024,1)} / ${f(g.mem_total_mb/1024,0)} GB</td><td>${f(g.temp_c,0)} °C</td><td>${f(g.power_w,0)} W</td><td>${ws.length?ws.map(w=>w.worker).join(', ')+' ('+f(ws.reduce((a,w)=>a+(w.gpu_mem_mb||0),0)/1024,1)+' GB)':'none'}</td></tr>`}).join('');
+  $('#rs-workers').innerHTML='<tr><th>Worker</th><th>PID</th><th>GPU</th><th>RAM</th><th>CPU</th><th>Threads</th><th>GPU memory</th><th>Now running</th><th>Progress</th><th>On it / typical</th><th>Episodes</th><th>Per hour</th><th>Disk</th></tr>'+s.workers.map(w=>`<tr><td>${w.worker}</td><td>${w.pid||'—'}</td><td>${w.gpu==null?'—':w.gpu}</td><td>${w.alive?gb(w.rss_gb):'—'}</td><td>${w.cpu_pct==null?'—':f(w.cpu_pct,0)+' %'}</td><td>${w.threads||'—'}</td><td>${w.gpu_mem_mb==null?'—':f(w.gpu_mem_mb,0)+' MB'}</td><td>${esc(w.ep_id||'—')}</td><td>${w.ep_pct==null?'—':(w.ep_exact?w.ep_step+' / '+w.ep_steps+' steps ('+f(w.ep_pct,0)+' %)':'~'+f(w.ep_pct,0)+' % (estimate)')}</td><td>${w.ep_elapsed_s==null?'—':fmt(w.ep_elapsed_s)+' / '+(w.ep_typical_s==null?'—':fmt(w.ep_typical_s))}</td><td>${w.episodes}</td><td>${w.rate_per_h==null?'—':f(w.rate_per_h,0)}</td><td>${f(w.disk_mb,0)} MB</td></tr>`).join('')
+   +`<tr><td><b>total</b></td><td></td><td></td><td><b>${gb(ou.ram_gb)}</b></td><td><b>${ou.cpu_cores==null?'—':f(ou.cpu_cores*100,0)+' %'}</b></td><td><b>${s.workers.reduce((a,w)=>a+(w.threads||0),0)}</b></td><td><b>${f(s.workers.reduce((a,w)=>a+(w.gpu_mem_mb||0),0),0)} MB</b></td><td></td><td></td><td></td><td><b>${s.written}</b></td><td><b>${f(s.workers.reduce((a,w)=>a+(w.rate_per_h||0),0),0)}</b></td><td><b>${f(s.workers.reduce((a,w)=>a+w.disk_mb,0),0)} MB</b></td></tr>`;
+}
+async function pollStats(){
+  try{const r=await fetch('stats.json',{cache:'no-store'});if(r.ok)applyStats(await r.json())}catch(e){}
+  setTimeout(pollStats,5000);
+}
 if(META.live)poll();
+if(META.live)pollStats();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 </script>
