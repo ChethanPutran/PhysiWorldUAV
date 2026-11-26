@@ -39,3 +39,8 @@ Position tracking error after 1 s, stab50_v0.1.0 (A) vs stab20_v0.1.0 (B), 24 co
 - The two attitude-mode scenarios are sensitive to the rate: without wind `roll_doublet` has 0.305 m RMS against 0.095 m (3.2 times) and `attitude_combined` 0.478 against 0.354 m (1.35 times); with wind they are not worse (0.84 and 0.87 times; their absolute errors, 1.6 to 2.0 m, are large at both rates). Overall mean RMS 0.320 m (20 Hz) against 0.329 m (50 Hz).
 - Limits: one episode per cell, one nominal vehicle, no vehicle randomisation. The differences in the attitude scenarios are not statistically established.
 - The rest of the pipeline at 20 Hz was checked on this data: training reads the decimation from the manifest (model step 0.05 s in the checkpoint), evaluation refuses a model trained at another rate, B1 and the oracle B6a run at 0.05 s (oracle 0.024 m at 20 steps = 1 s).
+
+## Addendum (2026-11-26): the force-model envelope was not checked
+
+The comparison above looked at tracking error only. In the same stored episodes the rotor-drag applicability violation fraction (advance ratio <= 0.20, rotor speed >= 20 % of maximum) is 0.0 at 50 Hz for all scenarios, and at 20 Hz 0.74 / 0.83 (`attitude_combined`, calm / windy) and 0.69 / 0.84 (`roll_doublet`); the position-controlled scenarios stay at 0.0. So the 20 Hz controller is not simply "stable": in the attitude-mode scenarios the rotors leave the validated range most of the time, and those episodes are excluded from model-ready data. Consequence in pilot v7: all 318 attitude-mode episodes are excluded (problems log B24).
+
