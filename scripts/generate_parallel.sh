@@ -9,6 +9,9 @@
 # the number of GPUs. Worker w uses GPU gpus[w mod n_gpus] through CUDA_VISIBLE_DEVICES (the config, hence the config hash,
 # is not touched). Isaac may print renderer allocation errors when a non-zero GPU is selected; the simulation does not render.
 #
+# Keep --workers the SAME when you restart an unfinished dataset: the split of episodes over workers depends on it and each worker's --resume
+# only reads its own shard files, so a different count regenerates episodes that exist in another worker's shard (duplicate ids, merge fails).
+#
 # Safe after crashes: every attempt starts the workers with --resume (episodes already written are skipped) and ends with a
 # merge. Stops when index.json says complete, after MAX_ATTEMPTS, or when an attempt writes nothing new.
 set -u
