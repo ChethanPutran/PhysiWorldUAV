@@ -79,6 +79,39 @@ body.dash #tip{display:none}
 .hostk{display:flex;gap:.5vw;flex-wrap:wrap;margin-top:.4vh}.hostk div{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:.2vh .5vw}.hostk b{font-variant-numeric:tabular-nums}
 #d-chart svg{flex:1;min-height:0;width:100%;height:100%}
 .ok{color:var(--c-phy)}.bad{color:var(--c-mag)}
+
+/* ---- phones and portrait screens: the dashboard becomes one scrolling column (fixed pixel sizes, tables scroll sideways, less important columns hidden) */
+@media (max-width:900px),(max-aspect-ratio:1/1){
+  body.dash{height:auto;min-height:100vh;overflow-y:auto;overflow-x:hidden;font-size:14px;line-height:1.4}
+  body.dash #view-dash{height:auto;display:flex;flex-direction:column;gap:10px;padding:10px 10px 28px}
+  #tabs{position:sticky;top:0;right:auto;justify-content:flex-end;padding:6px 10px;background:var(--bg);border-bottom:1px solid var(--line);z-index:30}
+  #tabs button{font-size:14px;padding:7px 12px}
+  #d-head{padding-right:0;flex-wrap:wrap;gap:4px 10px}#d-head h1{font-size:20px}
+  #d-bar{grid-template-columns:1fr}#d-bar .bar{height:14px}#d-pct{font-size:15px}
+  #d-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #d-tiles .t{padding:8px 10px}#d-tiles .t b{font-size:22px}#d-tiles .t span{font-size:12px}
+  .d-panel{padding:10px;overflow:visible;display:block}.d-panel>div{overflow-x:auto}
+  .d-panel h3{font-size:15px;flex-wrap:wrap;gap:2px 8px}
+  .d-panel table{font-size:12.5px}.d-panel th,.d-panel td,#d-workers td,#d-workers th{padding:6px 8px}
+  #d-wt th:nth-child(3),#d-wt td:nth-child(3),#d-wt th:nth-child(4),#d-wt td:nth-child(4),#d-wt th:nth-child(10),#d-wt td:nth-child(10),#d-wt th:nth-child(11),#d-wt td:nth-child(11),#d-wt th:nth-child(12),#d-wt td:nth-child(12){display:none}
+  .mini{width:60px;height:9px}
+  #d-chart svg{height:210px;width:100%}
+  #d-gt th:nth-child(4),#d-gt td:nth-child(4),#d-gt th:nth-child(5),#d-gt td:nth-child(5){display:none}
+  .hostk{gap:6px}.hostk div{padding:4px 8px;font-size:13px}
+  .rrow{grid-template-columns:130px minmax(0,1fr) 70px;gap:8px;margin:5px 0}.rbar{height:10px}
+  #d-lt th:nth-child(3),#d-lt td:nth-child(3){display:none}
+}
+@media (max-width:480px){.d-panel table{font-size:12px}.d-panel th,.d-panel td,#d-workers td,#d-workers th{padding:5px 5px}.mini{width:40px;margin-right:3px}#d-wt th:nth-child(2),#d-wt td:nth-child(2){display:none}}
+/* the long report view on small screens */
+@media (max-width:700px){
+  body{padding-block:10px 32px}.wrap{gap:12px}
+  h1{font-size:21px}h2{font-size:15px}
+  .panel{padding:12px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi{padding:9px 10px}.kpi b{font-size:21px}
+  .grid2{grid-template-columns:1fr;gap:12px}
+  #view-report .panel{overflow-x:auto}#view-report svg{min-width:620px}
+  .filters{gap:8px}.filters label{flex:1 1 44%}.filters select,.filters input{width:100%}
+  th,td{padding:5px 7px}.tablewrap{max-height:340px}
+}
 </style>
 
 <div id="tabs" hidden><button id="tab-dash" class="on">Dashboard</button><button id="tab-report">Plan &amp; episodes</button></div>
@@ -291,7 +324,7 @@ function applyIndex(idx,age){
   const nRun=(idx.running||[]).length,nQue=(idx.queued||[]).length,nPend=Math.max(total-done-nRun-nQue,0);
   $('#lv-kpis').innerHTML=[[n+' / '+total,'done'],[nRun,'running now'],[nQue,'queued (assigned to a running worker)'],[nPend,'pending (not assigned to a running worker)'],[nf,'failed'],[term,'ended early (e.g. ground contact)'],[fmt(wall),'elapsed (this invocation)'],[idx.in_progress&&eta?fmt(eta):'—','estimated time left']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
   $('#lv-note').textContent=(idx.validation&&idx.validation.ok!==null?'Validation: '+(idx.validation.ok?'passed':idx.validation.hard+' hard / '+idx.validation.soft+' soft findings')+'. ':'Validation runs when generation ends. ')+(nf?'Failed: '+idx.failures.map(f=>f.episode_id+' ('+f.error+')').join(', ')+'.':'');
-  $('#lv-recent').innerHTML='<tr><th>Latest episodes</th><th>Status</th><th>Steps</th></tr>'+idx.episodes.slice(-6).reverse().map(e=>`<tr><td>${esc(e.episode_id)}</td><td>${esc(e.status)}</td><td>${e.n_steps}</td></tr>`).join('');
+  $('#lv-recent').innerHTML='<tr><th>Latest episodes</th><th>Status</th><th>Steps</th></tr>'+idx.episodes.slice(-6).reverse().map(e=>`<tr><td>${esc(e.episode_id)}</td><td>${esc(e.status)}</td><td>${e.n_steps??''}</td></tr>`).join('');
   $('#lv-workers').innerHTML=(idx.workers||[]).length?'<tr><th>Worker</th><th>GPU</th><th>State</th><th>Done</th><th>Queued</th><th>Assigned</th><th>Running episode</th></tr>'+idx.workers.map(w=>`<tr><td>${w.worker}</td><td>${w.gpu}</td><td>${w.alive?'running':'not running'}</td><td>${w.done}</td><td>${w.queued}</td><td>${w.assigned}</td><td>${esc(w.current||'—')}</td></tr>`).join(''):'';
   table();
   LASTIDX=idx;if(document.body.classList.contains('dash'))renderDash();
@@ -336,7 +369,7 @@ function dashChart(hist,total){
   o+=`<polyline fill="none" stroke="var(--c-id)" stroke-width="2.2" points="${hist.map(p=>x(p[0]).toFixed(1)+','+y(p[1]).toFixed(1)).join(' ')}"/>`;
   if(rate&&last[1]<total)o+=`<line x1="${x(last[0])}" y1="${y(last[1])}" x2="${x(tEnd)}" y2="${y(total)}" stroke="var(--c-mag)" stroke-width="1.6" stroke-dasharray="5 4"/><text x="${W-m.r}" y="${y(total)-4}" text-anchor="end" style="fill:var(--c-mag)">projected finish ${new Date(tEnd*1000).toTimeString().slice(0,5)}</text>`;
   const fmtT=t=>new Date(t*1000).toTimeString().slice(0,5);
-  o+=`<text x="${m.l}" y="${H-5}">${fmtT(t0)}</text><text x="${x(last[0])}" y="${H-5}" text-anchor="${x(last[0])>W-m.r-60?'end':'middle'}">now ${fmtT(last[0])}</text><text x="${W-m.r}" y="${H-5}" text-anchor="end">${rate?fmtT(tEnd):''}</text>`;
+  o+=`<text x="${m.l}" y="${H-5}">${fmtT(t0)}</text>${x(last[0])-m.l>70&&x(last[0])<W-m.r-70?`<text x="${x(last[0])}" y="${H-5}" text-anchor="middle">now ${fmtT(last[0])}</text>`:''}<text x="${W-m.r}" y="${H-5}" text-anchor="end">${rate?fmtT(tEnd):''}</text>`;
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.innerHTML=o;$('#d-chart-note').textContent=dF(rate,0)+' episodes / h (since '+fmtT(t0)+')';
 }
 function renderDash(){
