@@ -62,6 +62,7 @@ select:focus-visible,input:focus-visible{outline:2px solid var(--c-id);outline-o
     <div id="lv-bar" style="height:10px;border-radius:5px;background:var(--grid);overflow:hidden;margin:10px 0 8px"><div id="lv-fill" style="height:100%;width:0;background:var(--c-id)"></div></div>
     <div class="kpis" id="lv-kpis"></div>
     <p class="note" id="lv-note" style="margin:10px 0 0"></p>
+    <div class="scroll" style="margin-top:8px"><table id="lv-workers"></table></div>
     <div class="scroll" style="margin-top:8px"><table id="lv-recent"></table></div>
   </section>
 
@@ -115,6 +116,7 @@ select:focus-visible,input:focus-visible{outline:2px solid var(--c-id);outline-o
       <label>Part <select id="f-part"></select></label>
       <label>Split <select id="f-split"></select></label>
       <label>Scenario <select id="f-scn"></select></label>
+      <label>Status <select id="f-status"><option value="">All</option><option>done</option><option>running</option><option>queued</option><option>pending</option><option>failed</option></select></label>
       <label>Search <input id="f-q" type="search" placeholder="episode or group id"></label>
       <span class="badge" id="f-count"></span>
     </div>
@@ -215,11 +217,14 @@ $('#tb-parts').innerHTML='<tr><th>Part</th><th>Episodes</th><th>Groups</th><th>T
 /* episode table */
 const opt=(el,vals)=>el.innerHTML='<option value="">All</option>'+vals.map(v=>`<option>${esc(v)}</option>`).join('');
 opt($('#f-part'),parts);opt($('#f-split'),[...new Set(ROWS.map(r=>r.split))]);opt($('#f-scn'),[...new Set(ROWS.map(r=>r.scn))].sort());
+const stOf=r=>r.failed?'failed':r.written?'done':r.live==='running'?'running':r.live==='queued'?'queued':(META.has_index||META.live)?'pending':'';
+const STCOL={done:'--c-id',running:'--c-mag',queued:'--c-val',pending:'--fg2',failed:'--c-phy'};
+const stPill=r=>{const k=stOf(r);if(!k)return '—';const extra=k==='done'&&r.status&&r.status!=='completed'?' ('+esc(r.status)+')':'';return `<span class="dot" style="background:var(${STCOL[k]})"></span>${k}${extra}`};
 function table(){
-  const p=$('#f-part').value,sp=$('#f-split').value,sn=$('#f-scn').value,q=$('#f-q').value.trim().toLowerCase();
-  const a=ROWS.filter(r=>(!p||r.part===p)&&(!sp||r.split===sp)&&(!sn||r.scn===sn)&&(!q||r.id.toLowerCase().includes(q)||r.grp.toLowerCase().includes(q)));
+  const p=$('#f-part').value,sp=$('#f-split').value,sn=$('#f-scn').value,q=$('#f-q').value.trim().toLowerCase(),fs=$('#f-status').value;
+  const a=ROWS.filter(r=>(!p||r.part===p)&&(!sp||r.split===sp)&&(!sn||r.scn===sn)&&(!fs||stOf(r)===fs)&&(!q||r.id.toLowerCase().includes(q)||r.grp.toLowerCase().includes(q)));
   $('#f-count').textContent=a.length+' of '+ROWS.length;
-  $('#tb-eps').innerHTML='<tr><th>Episode</th><th>Split</th><th>Scenario</th><th>Controller</th><th>Wind</th><th>Mean wind m/s</th><th>Domain</th><th>Duration s</th><th>Counterfactual</th><th>Status</th></tr>'+a.map(r=>`<tr><td>${r.id}</td><td><span class="dot" style="background:var(${catVar[catOf(r.split)]})"></span>${r.split}</td><td>${r.scn}</td><td>${r.ctrl}</td><td>${r.wp}</td><td>${r.wm.toFixed(2)}</td><td>${r.reg}</td><td>${r.dur.toFixed(1)}</td><td>${r.cf}${r.replay?' (replay)':''}</td><td>${r.status||(r.failed?'failed':(META.has_index||META.live)?'pending':'—')}</td></tr>`).join('');
+  $('#tb-eps').innerHTML='<tr><th>Episode</th><th>Split</th><th>Scenario</th><th>Controller</th><th>Wind</th><th>Mean wind m/s</th><th>Domain</th><th>Duration s</th><th>Counterfactual</th><th>Status</th></tr>'+a.map(r=>`<tr><td>${r.id}</td><td><span class="dot" style="background:var(${catVar[catOf(r.split)]})"></span>${r.split}</td><td>${r.scn}</td><td>${r.ctrl}</td><td>${r.wp}</td><td>${r.wm.toFixed(2)}</td><td>${r.reg}</td><td>${r.dur.toFixed(1)}</td><td>${r.cf}${r.replay?' (replay)':''}</td><td>${stPill(r)}</td></tr>`).join('');
 }
 ['#f-part','#f-split','#f-scn'].forEach(i=>$(i).addEventListener('change',table));$('#f-q').addEventListener('input',table);
 $('#ttl').textContent=META.dataset_id+' dataset report';document.title=META.dataset_id+' dataset report';
@@ -229,16 +234,19 @@ let LIVE_TIMER=null;
 function fmt(sec){sec=Math.max(0,Math.round(sec));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return (h?h+'h ':'')+(m||h?m+'m ':'')+s+'s'}
 function applyIndex(idx,age){
   const st=new Map(idx.episodes.map(e=>[e.episode_id,e.status])), bad=new Set((idx.failures||[]).map(f=>f.episode_id));
-  ROWS.forEach(r=>{r.status=st.get(r.id)||null;r.written=st.has(r.id);r.failed=bad.has(r.id)});
+  const run=new Set(idx.running||[]),que=new Set(idx.queued||[]);
+  ROWS.forEach(r=>{r.status=st.get(r.id)||null;r.written=st.has(r.id);r.failed=bad.has(r.id);r.live=run.has(r.id)?'running':que.has(r.id)?'queued':null});
   const n=idx.n_written,nf=(idx.failures||[]).length,total=idx.n_planned,done=n+nf,term=idx.episodes.filter(e=>e.status!=='completed').length;
   const stale=idx.in_progress&&age>120, state=idx.in_progress?(stale?'no update for '+fmt(age)+' (run may have stopped)':'running'):(idx.complete?'complete':'finished with problems');
   $('#lv-state').textContent=state;
   $('#lv-fill').style.width=(100*done/total)+'%';
   $('#lv-fill').style.background=nf||stale?css('--c-mag'):css('--c-id');
   const wall=idx.generation_wall_s||0, rate=n?wall/n:0, eta=idx.in_progress&&rate?(total-done)*rate:0;
-  $('#lv-kpis').innerHTML=[[n+' / '+total,'written'],[nf,'failed'],[term,'ended early (e.g. ground contact)'],[total-done,'remaining'],[fmt(wall),'elapsed (this invocation)'],[idx.in_progress&&eta?fmt(eta):'—','estimated time left']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+  const nRun=(idx.running||[]).length,nQue=(idx.queued||[]).length,nPend=Math.max(total-done-nRun-nQue,0);
+  $('#lv-kpis').innerHTML=[[n+' / '+total,'done'],[nRun,'running now'],[nQue,'queued (assigned to a running worker)'],[nPend,'pending (not assigned to a running worker)'],[nf,'failed'],[term,'ended early (e.g. ground contact)'],[fmt(wall),'elapsed (this invocation)'],[idx.in_progress&&eta?fmt(eta):'—','estimated time left']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
   $('#lv-note').textContent=(idx.validation&&idx.validation.ok!==null?'Validation: '+(idx.validation.ok?'passed':idx.validation.hard+' hard / '+idx.validation.soft+' soft findings')+'. ':'Validation runs when generation ends. ')+(nf?'Failed: '+idx.failures.map(f=>f.episode_id+' ('+f.error+')').join(', ')+'.':'');
   $('#lv-recent').innerHTML='<tr><th>Latest episodes</th><th>Status</th><th>Steps</th></tr>'+idx.episodes.slice(-6).reverse().map(e=>`<tr><td>${esc(e.episode_id)}</td><td>${esc(e.status)}</td><td>${e.n_steps}</td></tr>`).join('');
+  $('#lv-workers').innerHTML=(idx.workers||[]).length?'<tr><th>Worker</th><th>GPU</th><th>State</th><th>Done</th><th>Queued</th><th>Assigned</th><th>Running episode</th></tr>'+idx.workers.map(w=>`<tr><td>${w.worker}</td><td>${w.gpu}</td><td>${w.alive?'running':'not running'}</td><td>${w.done}</td><td>${w.queued}</td><td>${w.assigned}</td><td>${esc(w.current||'—')}</td></tr>`).join(''):'';
   table();
   return idx.in_progress;
 }

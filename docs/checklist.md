@@ -113,3 +113,4 @@ Reset checklist: edit the boxes above.
 - [ ] **(added)** Run 6 not started: sizing (episodes, domains, Mode B in test roles), envelope re-check of the wide wind, learning-curve experiment for the model-size / data question
 - [x] **(added)** 20 Hz model step supported end to end (decimation and model step read from the manifest; evaluation refuses a rate mismatch); tracking check at 20 Hz vs 50 Hz: `docs/results/tracking_20hz_vs_50hz.md`
 - [ ] **(added)** Pilot v7 generation (4,530 episodes, 20 Hz, stratified wide wind): planned and previewed, waits for approval
+- [x] **(added)** Automatic resume of an unfinished generation after a server restart (`scripts/resume_on_boot.sh`, container restart policy, `@reboot` cron; stop switch `logs/AUTO_RESUME`); dataset report page shows running / queued / pending / done per episode while a parallel generation runs

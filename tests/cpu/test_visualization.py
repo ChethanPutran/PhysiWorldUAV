@@ -133,3 +133,41 @@ def test_notify_posts_text_and_json(tmp_path):
     finally:
         srv.shutdown()
     assert got[0][1] == b"hello" and json.loads(got[1][1]) == {"text": "hello"} and json.loads(got[2][1]) == {"content": "hello"}
+
+
+def test_live_index_is_assembled_from_worker_files_during_a_parallel_generation(tmp_path):
+    import json
+    from physiworld_uav.visualization.dataset_report import combined_index
+    (tmp_path / "manifest.jsonl").write_text("\n".join(json.dumps({"episode_id": f"e{i}"}) for i in range(5)) + "\n")
+    assert combined_index(tmp_path) is None                                              # no plan yet
+    (tmp_path / "provenance.json").write_text("{}")
+    assert json.loads(combined_index(tmp_path)[0])["n_written"] == 0                     # planned, nothing written: an empty record, not None
+    (tmp_path / "index.worker00.json").write_text(json.dumps({"episodes": ["e0", "e2"], "failures": [], "in_progress": True, "generation_wall_s": 30.0}))
+    (tmp_path / "index.worker01.json").write_text(json.dumps({"episodes": ["e1"], "failures": [], "in_progress": True, "generation_wall_s": 20.0}))
+    body, age = combined_index(tmp_path)
+    idx = json.loads(body)
+    assert idx["n_written"] == 3 and idx["n_planned"] == 5 and idx["in_progress"] is True and not idx["complete"]
+    assert {e["episode_id"] for e in idx["episodes"]} == {"e0", "e1", "e2"} and age >= 0
+    (tmp_path / "index.json").write_text(json.dumps({"complete": True, "in_progress": False, "n_written": 5, "n_planned": 5, "episodes": []}))
+    assert json.loads(combined_index(tmp_path)[0])["complete"] is True                  # the merged index wins once the run is done
+
+
+def test_live_states_follow_the_generators_assignment_and_order():
+    import random
+    from physiworld_uav.experiments.generate import assign_workers
+    from physiworld_uav.visualization.dataset_report import _assign_workers, live_states
+    rng = random.Random(3)
+    rows = []
+    for g in range(12):
+        n = rng.choice([1, 3])
+        for i in range(n):
+            rows.append({"episode_id": f"g{g}_e{i}", "group_id": f"g{g}", "n_steps": rng.choice([1000, 2000, 2400]),
+                         "replay_of": f"g{g}_e0" if (n == 3 and i == 2) else None})
+    assert _assign_workers(rows, 4) == assign_workers(rows, 4)                          # the copy equals the generator's rule
+    st = live_states(rows, set(), set(), {0: 4, 1: 4, 2: 4, 3: 4})
+    assert len(st["running"]) == 4 and len(set(st["running"]) | set(st["queued"])) == len(rows)
+    assert all(r not in st["queued"] for r in st["running"])
+    done = set(st["running"])
+    st2 = live_states(rows, done, set(), {0: 4, 1: 4, 2: 4})                             # worker 3 is gone: its episodes are neither running nor queued
+    assert all(w["queued"] == 0 and w["current"] is None for w in st2["workers"] if w["worker"] == 3)
+    assert live_states(rows, set(), set(), {})["running"] == []                          # no live worker: everything is pending
