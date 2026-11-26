@@ -8,7 +8,7 @@ Run inside the isaac-sim container with the venv activated:
 
 Equivalent CLI:  python -m physiworld_uav.experiments.generate run experiment=smoke
 
-The previous 950-line example lives in lagacy/src_superseded/examples/.
+The previous 950-line example was removed with the superseded code (archive: /data2/chethan/mtech/archive/lagacy_2026-11-26.tar.gz).
 """
 from __future__ import annotations
 

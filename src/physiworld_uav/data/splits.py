@@ -7,7 +7,7 @@ of the training pool (10/25/50/100 %, thesis RQ3).
 """
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Sequence
 
 import numpy as np
 
@@ -22,11 +22,3 @@ def nested_group_subsets(group_ids: Sequence[str], fractions: Sequence[float],
     order = np.random.default_rng(seed).permutation(len(groups))
     ranked = groups[order]
     return {f: set(ranked[: max(1, int(round(f * len(ranked))))].tolist()) for f in fr}
-
-
-def roles_by_group(rows: Sequence[Mapping[str, str]]) -> dict[str, set[str]]:
-    """group_id -> set of split roles seen (must be a singleton; see validator)."""
-    out: dict[str, set[str]] = {}
-    for r in rows:
-        out.setdefault(r["group_id"], set()).add(r["split_role"])
-    return out

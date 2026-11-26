@@ -166,10 +166,3 @@ class ControlLaw:
 
     def rotor_command(self, raw_cmd: torch.Tensor) -> ControlOutput:
         return self._out(raw_cmd)
-
-
-def controller_params(nominal: DroneParams, domain_drone: DroneParams, policy: str) -> DroneParams:
-    """Parameters the controller is built from (decision Q2)."""
-    if policy not in POLICIES:
-        raise ValueError(f"controller_param_policy must be one of {POLICIES}")
-    return domain_drone if policy == "true" else nominal

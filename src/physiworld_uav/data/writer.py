@@ -114,12 +114,6 @@ def iter_episodes(shard: str | Path) -> Iterator[tuple[dict[str, np.ndarray], Ep
             yield _collect(g), EpisodeMetadata.from_json(g.attrs["metadata"])
 
 
-def list_metadata(shard: str | Path) -> list[EpisodeMetadata]:
-    with h5py.File(shard, "r") as f:
-        return [EpisodeMetadata.from_json(f["episodes"][eid].attrs["metadata"])
-                for eid in sorted(f["episodes"])]
-
-
 def verify_episode_group(g: h5py.Group) -> str:
     """"ok" | "mismatch" | "missing" (no checksum attribute) | "unreadable" (data cannot be read back)."""
     try:

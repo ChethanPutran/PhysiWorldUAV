@@ -39,14 +39,3 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"top-level YAML in {path} must be a mapping")
     return data
-
-
-def load_hummingbird(path: str | Path = "config/drone/hummingbird.yaml") -> dict[str, Any]:
-    cfg = load_yaml(path)
-    # Hard consistency checks that guard against silent divergence.
-    assert cfg["name"] == "hummingbird"
-    assert abs(cfg["arm_length_diagonal"] - cfg["l"]) < 1e-9
-    assert abs(cfg["arm_length_individual"] - cfg["l"] / 2.0) < 1e-9
-    assert cfg["rotor_configuration"]["num_rotors"] == 4
-    assert len(cfg["rotor_configuration"]["arm_lengths"]) == 4
-    return cfg

@@ -13,7 +13,6 @@ OmniDrones
 IsaacLab
 scripts/outputs
 .env
-lagacy
 # Secrets / local environment
 .env
 .env.*

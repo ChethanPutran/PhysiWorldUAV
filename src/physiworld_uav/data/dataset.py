@@ -1,6 +1,6 @@
 """Torch datasets over model-ready episodes (plan §6.5).
 
-(``SyntheticUAVDataset`` moved to ``lagacy/synthetic_dataset.py``.)
+(The old ``SyntheticUAVDataset`` was removed with the superseded code.)
 
 Sample semantics at current model step t (H = history, P = horizon):
 

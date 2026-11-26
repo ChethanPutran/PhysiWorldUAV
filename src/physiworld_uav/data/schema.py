@@ -155,14 +155,3 @@ def validate_arrays(arrays: Mapping[str, np.ndarray], *, data_type: str) -> list
     if unknown:
         issues.append(f"unknown fields (not in schema): {sorted(unknown)}")
     return issues
-
-
-def schema_table_markdown() -> str:
-    rows = ["| Field | Shape | dtype | Unit | Frame | Sem. | Req. | Description |",
-            "|---|---|---|---|---|---|---|---|"]
-    for f in FIELDS:
-        shape = "(N+1" if f.sem == "inst" else "(N"
-        shape += "".join(f",{w}" for w in f.width) + ")"
-        rows.append(f"| `{f.path}` | {shape} | {f.dtype} | {f.unit} | {f.frame} | {f.sem} | "
-                    f"{'yes' if f.required else 'no'} | {f.description} |")
-    return "\n".join(rows)

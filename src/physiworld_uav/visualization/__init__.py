@@ -1,1 +1,1 @@
-"""Dataset reports and episode plots (see dataset_report.py, episode_plots.py, plots.py)."""
+"""Live pages and plots: see README.md in this folder (entry point: python -m physiworld_uav.visualization)."""

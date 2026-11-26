@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -185,8 +185,3 @@ def model_layout() -> dict[str, Any]:
     return {"state": list(MODEL_STATE_LAYOUT),
             "obs": ["imu_accel_B[0:3]", "imu_gyro_B[3:6]"],
             "action_keys": sorted(ACTION_KEYS)}
-
-
-def iter_eligible(metas: Iterable[EpisodeMetadata], cfg: BuilderConfig,
-                  roles: Sequence[str] | None = None) -> list[EpisodeMetadata]:
-    return [m for m in metas if _eligible(m, cfg, roles)]

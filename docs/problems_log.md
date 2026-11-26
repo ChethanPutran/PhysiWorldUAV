@@ -50,7 +50,7 @@ Measured numbers are from the pilot dataset `physiworld_pilot_v0.5.0` (141 model
 | # | Problem | Evidence | Impact | Status |
 |---|---|---|---|---|
 | C1 | **Old checkpoints no longer load** (E, φ and widths changed). | Shape mismatch. | Earlier gate results cannot be re-evaluated. | **noted** |
-| C2 | **Metric keys changed** (`pos_m` → `pos_rmse_m` / `pos_mean_m`). | Old run records use `pos_m`. | Old summaries would break. | **fixed** (`summarize.py` reads both) |
+| C2 | **Metric keys changed** (`pos_m` → `pos_rmse_m` / `pos_mean_m`). | Old run records use `pos_m`. | Old summaries would break. | **fixed** (the old `evaluation/summarize.py`, which read both keys, was removed on 2026-11-26 as unused; `evaluation/report.py` reads the current key) |
 | C3 | **Latent models need the real IMU for any re-observation**, including the state-reset variant. | A test assumed otherwise and failed. | Semantics, not a bug. | **fixed** (explicit error message and documentation) |
 | C4 | **Training windows were built for the maximum horizon only**, so early curriculum stages lost windows. | 25,663 windows at H = 5 vs 25,348 at H = 10 on the pilot (per-stage now). | Fewer windows than necessary. | **fixed** |
 | C5 | **Loss weights could explode when the hold-last baseline is near zero.** | 1e-8 floor. | A near-perfect attitude baseline would dominate. | **fixed** (floors at 1 cm, 1 cm/s, 0.5°, 0.01 rad/s: proposed values) |

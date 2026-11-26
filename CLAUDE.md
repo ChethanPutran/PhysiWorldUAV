@@ -25,7 +25,7 @@ Plan → simulate → write → validate. A manifest row fully determines an epi
 More detail: `docs/guides/architecture.md`, `docs/models/*.md`, `docs/guides/assumptions_limitations.md`.
 
 ## Install / run / test
-Isaac Sim 4.1 and OmniDrones are **not pip-installable**; everything runs inside the docker container `isaac-sim` (Isaac at `/isaac-sim`, repo mounted at `/workspace/PhysiWorldUAV`, 4× RTX A6000 on the host). `OmniDrones/`, `IsaacLab/`, `omnidrones_env/`, `lagacy/` are git-ignored and live only on the host/container.
+Isaac Sim 4.1 and OmniDrones are **not pip-installable**; everything runs inside the docker container `isaac-sim` (Isaac at `/isaac-sim`, repo mounted at `/workspace/PhysiWorldUAV`, 4× RTX A6000 on the host). `OmniDrones/`, `IsaacLab/`, `omnidrones_env/` are git-ignored and live only on the host/container.
 
 ```bash
 docker exec isaac-sim bash -c 'cd /workspace/PhysiWorldUAV && source omnidrones_env/bin/activate && export PYTHONPATH=$PWD/src:$PYTHONPATH && <command>'
@@ -65,7 +65,7 @@ Without the container, only pure-Python parts (config, planning, wind, force equ
 * Force configs must be `validated: true` or the runner refuses them (`--allow-unvalidated-forces` is dev-only and such datasets never validate). Episodes outside any force-model envelope are excluded from model-ready data.
 * Approved aero truth (`config/forces/truth_default.yaml`): rotor drag d = 0.30 s⁻¹ (linear in Ω, in-plane), body drag with **per-axis C_D = (1.1, 1.1, 1.3)** and projected areas (0.0070, 0.0076, 0.0180) m², R = 0.10 m, ρ = 1.225; rotor-drag envelope μ ≤ **0.20** (widened from 0.15; fidelity reduced 0.15–0.20); OOD wind (4, 8] m/s.
 * Dryden frozen-turbulence speed = episode mean wind (not vehicle airspeed) so counterfactual pairs share realisations.
-* Legacy code is in `lagacy/` (sic, ignored); superseded force models in `lagacy/src_superseded/`.
+* The superseded first-generation code (old generators, force models, tests) was removed on 2026-11-26; an archive is in `/data2/chethan/mtech/archive/lagacy_2026-11-26.tar.gz` (outside the repo, nothing imports it).
 
 ## How the user wants to work
 * Do **not** silently resolve scientific ambiguities — present options with a recommendation and ask (esp. physical correctness, dataset validity, coefficients).

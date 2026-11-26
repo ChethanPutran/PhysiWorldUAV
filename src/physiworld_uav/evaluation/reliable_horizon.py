@@ -11,7 +11,3 @@ def reliable_horizon(pred: torch.Tensor, target: torch.Tensor, threshold: float 
     """(B,) integer number of reliable steps (0 … K)."""
     ok = (position_error(pred, target) <= threshold).float()
     return torch.cumprod(ok, dim=1).sum(dim=1)
-
-
-def mean_reliable_horizon(pred: torch.Tensor, target: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
-    return reliable_horizon(pred, target, threshold).mean()

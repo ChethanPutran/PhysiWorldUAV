@@ -65,7 +65,7 @@ docker exec isaac-sim bash -c 'cd /workspace/PhysiWorldUAV && source omnidrones_
 * `plan` (manifest only, also for a dataset that is not generated yet): `figures/1_sizes_per_role.png`, `2_wind.png` (mean / peak speed by role with the ID and OOD limits, azimuth, elevation, profile types), `3_vehicle_factors.png`, `4_scenarios_modes.png`, `5_initial_conditions.png`, `tables/per_role.csv`. Options `--id-peak-limit` and `--ood-peak-limit` draw the limits.
 * `wind` (reads the stored wind of the episodes): `figures/wind_speed_per_timestep.png`, `wind_per_episode.png`, `tables/wind_by_role.csv`.
 
-Other plots live in this folder as well: `dataset_report.py` (the report), `episode_plots.py` and `plots.py` (single-episode plots), `templates/` (the report page). Evaluation figures and tables of trained models are made by `evaluation/report.py`, not here.
+Other plots live in this folder as well: `dataset_report.py` (the report), `episode_plots.py` (a quick look at one episode: `python -m physiworld_uav.visualization.episode_plots --dataset <dir> --episode <id>`), `templates/` (the report page). Evaluation figures and tables of trained models are made by `evaluation/report.py`, not here.
 
 ## Tests
 
