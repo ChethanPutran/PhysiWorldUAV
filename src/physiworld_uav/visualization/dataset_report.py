@@ -18,6 +18,7 @@ import shutil
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Sequence
 
 TEMPLATE = Path(__file__).parent / "templates" / "dataset_report.html"
 
@@ -379,8 +380,11 @@ def combined_index(dataset_dir: Path) -> tuple[bytes, float] | None:
     return json.dumps(idx).encode(), max(0.0, time.time() - newest)
 
 
-def make_handler(dataset_dir: Path):
-    """Serve exactly two paths: the report page (rebuilt per request) and the live index.json."""
+def make_handler(dataset_dir: Path, allow: Sequence[str] | None = None):
+    """Serve the report page (rebuilt per request), the live index.json and stats.json, to clients in ``allow`` networks only (default:
+    ``access.DEFAULT_ALLOW``: this machine, 10.0.0.0/8, 100.64.0.0/10)."""
+    from physiworld_uav.visualization.access import DEFAULT_ALLOW, allowed
+    nets = tuple(allow) if allow else DEFAULT_ALLOW
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None) -> None:
@@ -394,6 +398,9 @@ def make_handler(dataset_dir: Path):
             self.wfile.write(body)
 
         def do_GET(self) -> None:  # noqa: N802
+            if not allowed(self.client_address[0], nets):
+                self._send(403, b"forbidden: this page is limited to the campus network", "text/plain; charset=utf-8")
+                return
             path = self.path.split("?", 1)[0]
             if path in ("/", "/report.html"):
                 try:
@@ -420,8 +427,8 @@ def make_handler(dataset_dir: Path):
     return Handler
 
 
-def serve(dataset_dir: Path, host: str = "127.0.0.1", port: int = 8000) -> None:
-    server = ThreadingHTTPServer((host, port), make_handler(Path(dataset_dir)))
+def serve(dataset_dir: Path, host: str = "127.0.0.1", port: int = 8000, allow: Sequence[str] | None = None) -> None:
+    server = ThreadingHTTPServer((host, port), make_handler(Path(dataset_dir), allow))
     print(f"serving {dataset_dir} at http://{host}:{server.server_address[1]}/  (Ctrl+C to stop)", flush=True)
     try:
         server.serve_forever()
@@ -439,9 +446,11 @@ def main(argv: list[str] | None = None) -> Path | None:
                    help="serve a live page that follows index.json while generation runs (no file is written)")
     p.add_argument("--host", default="127.0.0.1", help="bind address for --serve (default: local only)")
     p.add_argument("--port", type=int, default=8000, help="port for --serve; 0 picks a free one (this is a shared server)")
+    p.add_argument("--allow", nargs="*", default=None, metavar="CIDR",
+                   help="client networks that may open the page (default: this machine, 10.0.0.0/8 and 100.64.0.0/10 (Tailscale); others get 403)")
     a = p.parse_args(argv)
     if a.serve:
-        serve(a.dataset, a.host, a.port)
+        serve(a.dataset, a.host, a.port, a.allow)
         return None
     out = a.out or a.dataset / "report.html"
     out.write_text(build_report(a.dataset))

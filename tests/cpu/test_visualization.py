@@ -232,3 +232,33 @@ def test_training_dashboard_data_counts_jobs_and_reads_metrics(tmp_path):
     j = {x["name"]: x for x in d["jobs"]}
     assert j["fx_v06_b3_s1"]["epoch"] == 1 and j["fx_v06_b3_s1"]["val"] == 0.05 and j["fx_v06_b3_s1"]["best"] == 0.04 and j["fx_v06_b4_s0"]["epoch"] == 0
     assert "id=\"view-dash\"" in PAGE and "max-aspect-ratio" in PAGE and "id=\"view-curves\"" in PAGE         # dashboard, phone layout and the curves tab are in the page
+
+
+def test_access_list_allows_campus_and_tailscale_only():
+    from physiworld_uav.visualization.access import allowed, parse_networks
+    for ok in ("127.0.0.1", "::1", "10.24.36.33", "10.1.2.3", "10.255.255.254", "100.115.191.34", "::ffff:10.24.240.21"):
+        assert allowed(ok), ok
+    for bad in ("8.8.8.8", "192.168.1.5", "172.16.0.9", "100.63.0.1", "11.0.0.1", "not-an-ip", ""):
+        assert not allowed(bad), bad
+    assert allowed("192.168.1.5", parse_networks(["192.168.1.0/24"])) and not allowed("10.1.1.1", ["192.168.1.0/24"])
+
+
+def test_report_server_answers_403_to_clients_outside_the_allowed_networks(tmp_path):
+    import json
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from physiworld_uav.visualization.dataset_report import make_handler
+    (tmp_path / "manifest.jsonl").write_text(json.dumps({"episode_id": "e0", "sim": {"control_decimation": 4}}) + "\n")
+    (tmp_path / "provenance.json").write_text("{}")
+    for allow, expect in ((None, 200), (["10.0.0.0/8"], 403)):                      # the test client is 127.0.0.1: allowed by default, not by 10.0.0.0/8
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path, allow))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            code = urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/index.json", timeout=5).status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        finally:
+            srv.shutdown(); srv.server_close()
+        assert code == expect, (allow, code)

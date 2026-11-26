@@ -360,6 +360,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--serve", action="store_true", help="write the page into the sweep folder AND serve that folder over HTTP (one process); open /live.html")
     ap.add_argument("--host", default="127.0.0.1", help="bind address for --serve (default: local only; reach it through an SSH tunnel)")
     ap.add_argument("--port", type=int, default=60194, help="port for --serve (0 picks a free one; this is a shared server)")
+    ap.add_argument("--allow", nargs="*", default=None, metavar="CIDR",
+                    help="client networks that may open the page (default: this machine, 10.0.0.0/8 and 100.64.0.0/10 (Tailscale); others get 403)")
     a = ap.parse_args(argv)
     if a.serve:
         import functools
@@ -367,9 +369,26 @@ def main(argv: list[str] | None = None) -> None:
         from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
         page = a.sweep / "live.html"
         threading.Thread(target=main, args=(["--sweep", str(a.sweep), "--exp-root", str(a.exp_root), "--interval", str(a.interval), "--html", str(page)],), daemon=True).start()
+        from physiworld_uav.visualization.access import DEFAULT_ALLOW, allowed
+        nets = tuple(a.allow) if a.allow else DEFAULT_ALLOW
+
         class Quiet(SimpleHTTPRequestHandler):
             def log_message(self, *args, **kw) -> None:                      # keep the terminal quiet
                 pass
+
+            def _deny(self) -> bool:
+                if allowed(self.client_address[0], nets):
+                    return False
+                self.send_error(403, "forbidden: this page is limited to the campus network")
+                return True
+
+            def do_GET(self) -> None:  # noqa: N802
+                if not self._deny():
+                    super().do_GET()
+
+            def do_HEAD(self) -> None:  # noqa: N802
+                if not self._deny():
+                    super().do_HEAD()
 
         handler = functools.partial(Quiet, directory=str(a.sweep))
         srv = ThreadingHTTPServer((a.host, a.port), handler)

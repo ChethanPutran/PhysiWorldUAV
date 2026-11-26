@@ -17,6 +17,10 @@ python -m physiworld_uav.visualization <command> [options]      # needs PYTHONPA
 
 Convenience launcher for the two servers, run on the **host**: `scripts/start_report_server.sh` (`generation` / `training` / `status` / `stop`).
 
+## Who can open the pages
+
+The two servers have no login. Started with `--public` they listen on all interfaces but answer only clients from this machine, the campus network `10.0.0.0/8` and Tailscale `100.64.0.0/10`; everyone else gets HTTP 403 (`access.py`, option `--allow <CIDR> ...` to change it). Your own address does not matter, only the server's: 10.24.36.121 (static; it also has the Tailscale address 100.115.191.34). From another network (a hostel, a phone on mobile data) the page opens only if that network can reach the server; otherwise use an SSH tunnel (works wherever SSH works) or Tailscale.
+
 ## 1. Live data generation
 
 ```
