@@ -18,13 +18,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from .wind_manager import WindManager
 
-PROFILE_TYPES = ("none", "steady", "cosine_gust", "step", "sinusoid", "ou", "random_gusts")
+PROFILE_TYPES = ("none", "steady", "cosine_gust", "step", "sinusoid", "ou", "random_gusts", "dryden", "composite")
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +83,8 @@ class WindRegime:
     profiles: tuple[tuple[str, float, dict], ...]   # (type, weight, params)
     limits: Limits
     max_tries: int = 200
+    speed_strata: int = 0                       # >0: stratified mean speed, see ``speed_bands`` / ``assign_strata`` (0 = i.i.d. uniform)
+    speed_strata_weights: tuple[float, ...] = ()   # relative share of the groups per band (empty = equal); higher bands usually get more
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "WindRegime":
@@ -105,7 +107,47 @@ class WindRegime:
             profiles=tuple(profiles),
             limits=Limits.from_dict(d["limits"]),
             max_tries=int(d.get("max_tries", 200)),
+            speed_strata=int(d.get("speed_strata", 0)),
+            speed_strata_weights=tuple(float(x) for x in d.get("speed_strata_weights", ())),
         )
+
+    def speed_bands(self) -> list[tuple[float, float]]:
+        """``speed_strata`` equal-width bands covering ``mean_speed`` (empty when stratification is off)."""
+        k = self.speed_strata
+        lo, hi = self.mean_speed.lo, self.mean_speed.hi
+        return [(lo + i * (hi - lo) / k, lo + (i + 1) * (hi - lo) / k) for i in range(k)] if k > 0 else []
+
+
+def _largest_remainder(weights: Sequence[float], n: int) -> list[int]:
+    w = np.asarray(weights, dtype=float)
+    if w.shape[0] == 0 or (w < 0).any() or w.sum() <= 0:
+        raise ValueError(f"speed_strata_weights must be non-negative with a positive sum, got {list(weights)}")
+    ideal = w / w.sum() * n
+    counts = np.floor(ideal).astype(int)
+    for i in np.argsort(-(ideal - counts), kind="stable")[: n - int(counts.sum())]:
+        counts[i] += 1
+    if n >= len(counts):                         # no empty band when there are enough groups: take the groups from the fullest band
+        for i in np.where((counts == 0) & (w > 0))[0]:
+            counts[int(np.argmax(counts))] -= 1
+            counts[i] += 1
+    return counts.tolist()
+
+
+def assign_strata(n: int, k: int, rng: np.random.Generator, weights: Sequence[float] = ()) -> list[int]:
+    """Band index of each of ``n`` groups. Without ``weights`` every band gets ``floor(n/k)`` or ``ceil(n/k)`` groups; with ``weights``
+    (length k) the counts follow the weights by largest remainder (band i gets about n·w_i/Σw groups). Either way in a random order.
+
+    Weighted bands: the counterfactual siblings (wind × 0.0 and × 0.5) pile up at low speed, so equal group counts still give most
+    episodes below 1 m/s; more groups in the upper bands flatten the distribution of the episodes.
+
+    Stratified (not i.i.d.) sampling of the episode-mean wind speed: with few groups per role, i.i.d. uniform draws leave bands empty
+    by chance. Deterministic given ``rng`` (a child of the part's seed node), so the plan stays reproducible."""
+    if weights:
+        if len(weights) != k:
+            raise ValueError(f"speed_strata_weights has {len(weights)} entries for {k} bands")
+        bands = [i for i, c in enumerate(_largest_remainder(weights, n)) for _ in range(c)]
+        return [bands[int(j)] for j in rng.permutation(n)]
+    return [int(r) % k for r in rng.permutation(n)]
 
 
 # ---------------------------------------------------------------------------
@@ -148,12 +190,41 @@ def _perp_horizontal(d: list[float]) -> list[float]:
 
 
 def _component_spec(ptype: str, params: Mapping[str, Any], mean_dir: list[float],
-                    duration: float, rng: np.random.Generator) -> tuple[list[dict], dict[str, str]]:
-    """Return (gust spec list, labels) for one profile type."""
+                    duration: float, rng: np.random.Generator,
+                    extra: dict[str, Any] | None = None) -> tuple[list[dict], dict[str, str]]:
+    """Return (gust spec list, labels) for one profile type.
+
+    ``extra`` receives spec entries that are not gusts (``extra["turbulence"]`` for ``dryden``)."""
     r = lambda key, default: Range.of(params.get(key, default)).draw(rng)   # noqa: E731
     labels: dict[str, str] = {}
     if ptype in ("none", "steady"):
         return [], {"temporal_class": "constant"}
+    if ptype == "dryden":
+        # stationary Dryden turbulence (MIL-F-8785C form) with explicit intensities and length scales; the frozen-turbulence speed is the
+        # episode's mean horizontal wind (wind_manager), so counterfactual pairs share realisations.
+        if extra is None:
+            raise ValueError("a dryden profile needs the spec to carry a turbulence entry")
+        sig = r("sigma_uv_mps", [0.2, 0.6])
+        extra["turbulence"] = {"enabled": True, "model": "dryden",
+                               "intensities_mps": [sig, sig, sig * float(params.get("sigma_w_ratio", 0.5))],
+                               "length_scales_m": [r("length_scale_uv_m", [10.0, 30.0])] * 2 + [r("length_scale_w_m", [2.0, 5.0])]}
+        return [], {"temporal_class": "turbulent", "gust_class": "turbulence"}
+    if ptype == "composite":
+        # several components in one episode: e.g. a wind level that steps up and back down (a regime "switch") with an OU or Dryden
+        # overlay. Components are added; each draws its own parameters from the same rng, in order (deterministic).
+        subs = params.get("components")
+        if not subs:
+            raise ValueError("a composite profile needs a non-empty `components` list")
+        gusts_all: list[dict] = []
+        for sub in subs:
+            st = str(sub["type"])
+            if st in ("composite", "none"):
+                raise ValueError(f"composite components cannot be {st!r}")
+            g, lab = _component_spec(st, sub.get("params", {}), mean_dir, duration, rng, extra)
+            gusts_all += g
+            labels.update({k: v for k, v in lab.items() if k != "temporal_class"})
+        labels["temporal_class"] = "composite"
+        return gusts_all, labels
     if ptype == "cosine_gust":
         rise = r("rise_time_s", [0.5, 1.5])
         onset = r("onset_fraction", [0.1, 0.8]) * duration
@@ -237,11 +308,12 @@ def check_limits(stats: Mapping[str, float], lim: Limits) -> list[str]:
 
 
 def sample_wind(regime: WindRegime, rng: np.random.Generator, *, duration: float, dt: float,
-                profile: str | None = None) -> WindPlan:
+                profile: str | None = None, speed_range: tuple[float, float] | None = None) -> WindPlan:
     """Draw one concrete wind realisation satisfying ``regime.limits``.
 
     ``profile`` forces a profile type (used by experiment mixes); otherwise it
-    is drawn by weight. Raises ``RuntimeError`` if no valid realisation is found.
+    is drawn by weight. ``speed_range`` restricts the draw of the mean speed to one stratum (uniform inside it);
+    None keeps the regime's whole range. Raises ``RuntimeError`` if no valid realisation is found.
     """
     types = [p[0] for p in regime.profiles]
     weights = np.array([p[1] for p in regime.profiles], dtype=float)
@@ -255,14 +327,21 @@ def sample_wind(regime: WindRegime, rng: np.random.Generator, *, duration: float
                 raise ValueError(f"profile {profile!r} not offered by regime {regime.name!r}")
             idx = types.index(profile)
         ptype, _, params = regime.profiles[idx]
-        speed = 0.0 if ptype == "none" else regime.mean_speed.draw(rng)
+        if ptype == "none":
+            speed = 0.0
+        elif speed_range is not None:
+            speed = float(rng.uniform(speed_range[0], speed_range[1]))
+        else:
+            speed = regime.mean_speed.draw(rng)
         band = regime.elevation_deg[int(rng.integers(len(regime.elevation_deg)))]
         direction = unit_vector(regime.azimuth_deg.draw(rng), band.draw(rng))
-        gusts, labels = _component_spec(ptype, params, direction, duration, rng)
+        extra: dict[str, Any] = {}
+        gusts, labels = _component_spec(ptype, params, direction, duration, rng, extra)
         spec: dict[str, Any] = {"steady": {"enabled": speed > 0.0, "speed_mps": speed,
                                            "direction": direction}}
         if gusts:
             spec["gust"] = gusts
+        spec.update(extra)                                  # e.g. "turbulence" for dryden profiles
         seed = int(rng.integers(0, 2**31 - 1))
         stats = realised_stats(evaluate_series(spec, seed, duration, dt))
         last = check_limits(stats, regime.limits)

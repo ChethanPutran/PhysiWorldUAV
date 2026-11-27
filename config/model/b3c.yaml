@@ -1,0 +1,3 @@
+# Architectural-bias option (c), residual reads the decoder trunk: B3 (model_specification.md §3.4); everything else as config/model/b3.yaml.
+kind: b3
+shared_trunk: true

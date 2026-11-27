@@ -1,0 +1,5 @@
+# Known-vehicle variant (decision 2026-11-27): the true vehicle parameters (mass, thrust and moment constants, effective inertia) are known;
+# the model has to predict the dynamics under UNKNOWN wind (and unknown aero: drag scales and motor time constant are not given).
+# Use after default.yaml / v7_openloop.yaml:  --config config/training/default.yaml config/training/v7_openloop.yaml config/training/known_vehicle.yaml
+known_vehicle: true
+vehicle_input: true

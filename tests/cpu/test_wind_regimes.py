@@ -77,3 +77,48 @@ def test_step_gust_rise_time():
     assert np.allclose(g.contribution(None, 0.99), 0.0)
     assert np.allclose(g.contribution(None, 1.25), [1.0, 0, 0])
     assert np.allclose(g.contribution(None, 1.6), [2.0, 0, 0])
+
+
+# ------------------------------------------------------------------ stratified mean speed (Run 6 wind plan)
+def test_assign_strata_is_balanced_and_deterministic():
+    import numpy as np
+    from physiworld_uav.wind.regimes import assign_strata
+    for n, k in ((28, 5), (6, 5), (7, 3), (3, 5), (1, 3)):
+        b = assign_strata(n, k, np.random.default_rng(1))
+        counts = [b.count(i) for i in range(k)]
+        assert sum(counts) == n and max(counts) - min(counts) <= 1 or n < k
+        assert b == assign_strata(n, k, np.random.default_rng(1))
+    assert assign_strata(40, 5, np.random.default_rng(1)) != assign_strata(40, 5, np.random.default_rng(2))
+
+
+def test_speed_bands_cover_the_range_and_sample_wind_respects_a_stratum():
+    import numpy as np
+    from physiworld_uav.config import load_template
+    from physiworld_uav.wind.regimes import WindRegime, sample_wind
+    reg = WindRegime.from_dict(load_template("wind/regimes", "id_wide"))
+    assert reg.speed_strata == 5 and reg.speed_bands() == [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0), (4.0, 5.0)]
+    for lo, hi in reg.speed_bands()[::2]:
+        for seed in range(4):
+            w = sample_wind(reg, np.random.default_rng(seed), duration=6.0, dt=0.02, speed_range=(lo, hi))
+            assert lo - 1e-9 <= w.spec["steady"]["speed_mps"] <= hi + 1e-9
+    off = WindRegime.from_dict(load_template("wind/regimes", "id"))
+    assert off.speed_strata == 0 and off.speed_bands() == []
+
+
+def test_weighted_strata_follow_the_weights_and_are_deterministic():
+    import numpy as np
+    import pytest
+    from physiworld_uav.wind.regimes import assign_strata
+    w = [0.5, 1, 2, 3, 3]
+    for n in (6, 28, 40, 100):
+        b = assign_strata(n, 5, np.random.default_rng(3), w)
+        counts = [b.count(i) for i in range(5)]
+        ideal = np.array(w) / sum(w) * n
+        assert sum(counts) == n and all(abs(c - i) <= 1.5 for c, i in zip(counts, ideal)), (n, counts, ideal)
+        if n >= 5:
+            assert min(counts) >= 1, counts                      # no empty band when there are enough groups
+        assert b == assign_strata(n, 5, np.random.default_rng(3), w)
+    assert assign_strata(10, 5, np.random.default_rng(0), []) == assign_strata(10, 5, np.random.default_rng(0))   # no weights: unchanged
+    for bad in ([1, 1], [0, 0, 0, 0, 0], [-1, 1, 1, 1, 1]):
+        with pytest.raises(ValueError):
+            assign_strata(10, 5, np.random.default_rng(0), bad)

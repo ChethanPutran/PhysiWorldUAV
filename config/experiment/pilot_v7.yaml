@@ -1,0 +1,215 @@
+# Pilot v7 (2026-11-25, PLAN ONLY until approved): 20 Hz model step (physics=isaac_200hz_m20, control_decimation 10), 10 s = 200-step episodes,
+# about 1M model steps in total. Wind: id_v7 (ID peak <= 6.2 m/s, mean 0-5.2, 5 stratified, upper-weighted bands) and ood_magnitude_v7 (mean > 6.2, peak <= 9,
+# 3 bands). Parts as in the pilot, groups scaled about 34x (sizes below), 20-200 domains per part (about 470 vehicles).
+# Plan:  generate plan experiment=pilot_v7 physics=isaac_200hz_m20
+name: pilot_v7
+dataset_id: physiworld_pilot_v7
+dataset_version: 0.7.0
+seed: 20261125
+parts:
+- name: id_cl
+  roles: {train: 0.7, val_id: 0.15, test_id: 0.15}
+  n_groups: 1360
+  domain: randomized
+  n_domains: 200
+  wind_regime: id_v7
+  forces: truth_default
+  counterfactual: {template: wind_magnitude, fraction: 0.3}
+  mix:
+  - scenario: hover
+    weight: 0.1
+    experiment_group: A
+    overrides: {duration_s: 10.0}
+  - scenario: translation
+    weight: 0.1
+    experiment_group: B
+    excitation: ref_smooth
+    overrides: {duration_s: 10.0}
+  - scenario: line
+    weight: 0.08
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: vertical
+    weight: 0.05
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: accel_decel
+    weight: 0.15
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: circle
+    weight: 0.08
+    experiment_group: D
+    excitation: multisine
+    overrides: {duration_s: 10.0}
+  - scenario: sinusoidal
+    weight: 0.06
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: waypoints
+    weight: 0.05
+    experiment_group: C
+    excitation: prbs
+    overrides: {duration_s: 10.0}
+  - scenario: combined
+    weight: 0.08
+    experiment_group: F
+    excitation: chirp
+    overrides: {duration_s: 10.0}
+  - scenario: yaw_step
+    weight: 0.06
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: yaw_sine
+    weight: 0.04
+    experiment_group: B
+    excitation: yaw_excitation
+    overrides: {duration_s: 10.0}
+  - scenario: roll_doublet
+    weight: 0.05
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: pitch_doublet
+    weight: 0.05
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+  - scenario: attitude_combined
+    weight: 0.05
+    experiment_group: B
+    overrides: {duration_s: 10.0}
+- name: id_ol
+  roles: {train: 0.7, val_id: 0.15, test_id: 0.15}
+  n_groups: 476
+  domain: randomized
+  n_domains: 80
+  wind_regime: id_v7
+  forces: truth_default
+  counterfactual: {template: wind_magnitude_fixed_action, fraction: 0.5}
+  mix:
+  - scenario: open_loop_rotor
+    weight: 0.5
+    experiment_group: E
+    excitation: rotor_doublets
+    overrides: {duration_s: 10.0}
+  - scenario: open_loop_collective_rate
+    weight: 0.5
+    experiment_group: E
+    excitation: rate_doublets
+    overrides: {duration_s: 10.0}
+- name: ood_mag
+  roles: {val_ood_magnitude: 0.3, test_ood_magnitude: 0.7}
+  n_groups: 340
+  domain: randomized
+  n_domains: 40
+  wind_regime: ood_magnitude_v7
+  forces: truth_default
+  mix:
+  - scenario: hover
+    weight: 0.2
+    overrides: {duration_s: 10.0}
+  - scenario: translation
+    weight: 0.3
+    overrides: {duration_s: 10.0}
+  - scenario: accel_decel
+    weight: 0.3
+    overrides: {duration_s: 10.0}
+  - scenario: circle
+    weight: 0.2
+    overrides: {duration_s: 10.0}
+- name: ood_dir
+  roles: {val_ood_direction: 0.3, test_ood_direction: 0.7}
+  n_groups: 204
+  domain: randomized
+  n_domains: 20
+  wind_regime: ood_direction
+  forces: truth_default
+  mix:
+  - scenario: hover
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+  - scenario: translation
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+- name: ood_tmp
+  roles: {val_ood_temporal: 0.3, test_ood_temporal: 0.7}
+  n_groups: 204
+  domain: randomized
+  n_domains: 20
+  wind_regime: ood_temporal
+  forces: truth_default
+  mix:
+  - scenario: hover
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+  - scenario: line
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+- name: ood_gst
+  roles: {val_ood_gust: 0.3, test_ood_gust: 0.7}
+  n_groups: 204
+  domain: randomized
+  n_domains: 20
+  wind_regime: ood_gust
+  forces: truth_default
+  mix:
+  - scenario: hover
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+  - scenario: accel_decel
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+- name: ood_phy
+  roles: {val_ood_physics: 0.3, test_ood_physics: 0.7}
+  n_groups: 204
+  domain: randomized
+  domain_overrides: {region: ood_physics}
+  n_domains: 40
+  wind_regime: id_v7
+  forces: truth_default
+  mix:
+  - scenario: translation
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+  - scenario: circle
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+- name: ood_cmb
+  roles: {test_ood_physics: 1.0}
+  n_groups: 102
+  domain: randomized
+  domain_overrides: {region: ood_combination}
+  n_domains: 30
+  wind_regime: id_v7
+  forces: truth_default
+  mix:
+  - scenario: accel_decel
+    weight: 1.0
+    overrides: {duration_s: 10.0}
+- name: ood_trj
+  roles: {test_ood_trajectory: 1.0}
+  n_groups: 136
+  domain: randomized
+  n_domains: 20
+  wind_regime: id_v7
+  forces: truth_default
+  mix:
+  - scenario: helix
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+  - scenario: figure_eight
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+- name: phys_val
+  role: physics_validation
+  n_groups: 8
+  domain: nominal
+  wind_regime: none
+  forces: truth_default
+  counterfactual: {template: mass}
+  mix:
+  - scenario: hover
+    weight: 0.5
+    overrides: {duration_s: 10.0}
+  - scenario: accel_decel
+    weight: 0.5
+    overrides: {duration_s: 10.0}

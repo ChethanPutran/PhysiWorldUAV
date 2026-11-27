@@ -1,0 +1,415 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dataset Report</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: a single scrolling report; KPI strip, then one panel per question (what / which scenarios / which wind / which vehicles / counterfactuals), then a filterable episode table. */
+:root{
+  --bg:#fcfcfb; --panel:#ffffff; --fg:#0b0b0b; --fg2:#52514e; --muted:#8a8984; --line:#e4e3de; --grid:#eceae5;
+  --c-id:#2a78d6; --c-mag:#eb6834; --c-dir:#1baf7a; --c-tmp:#eda100; --c-gst:#e87ba4; --c-phy:#008300; --c-trj:#6250d6; --c-val:#8a8984;
+  --band1:rgba(42,120,214,.10); --band2:rgba(42,120,214,.05);
+  --head:"Space Grotesk","Inter",system-ui,sans-serif; --body:"Inter",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#1a1a19; --panel:#222221; --fg:#f0efec; --fg2:#c3c2b7; --muted:#8f8e86; --line:#363633; --grid:#2d2d2b;
+  --c-id:#3987e5; --c-mag:#d95926; --c-dir:#199e70; --c-tmp:#c98500; --c-gst:#d55181; --c-phy:#0ca30c; --c-trj:#9085e9; --c-val:#8f8e86;
+  --band1:rgba(57,135,229,.16); --band2:rgba(57,135,229,.08); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1a1a19; --panel:#222221; --fg:#f0efec; --fg2:#c3c2b7; --muted:#8f8e86; --line:#363633; --grid:#2d2d2b;
+  --c-id:#3987e5; --c-mag:#d95926; --c-dir:#199e70; --c-tmp:#c98500; --c-gst:#d55181; --c-phy:#0ca30c; --c-trj:#9085e9; --c-val:#8f8e86;
+  --band1:rgba(57,135,229,.16); --band2:rgba(57,135,229,.08); color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.5 var(--body);padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font:600 28px/1.15 var(--head);margin:0;text-wrap:balance}
+h2{font:600 17px/1.3 var(--head);margin:0 0 2px}
+.sub{color:var(--fg2);margin:4px 0 0;max-width:70ch}
+.note{color:var(--fg2);font-size:12.5px;margin:0 0 12px;max-width:80ch}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.kpi b{display:block;font:600 26px/1.1 var(--head);font-variant-numeric:tabular-nums}
+.kpi span{color:var(--fg2);font-size:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:20px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--fg2);margin:0 0 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+svg text{fill:var(--fg2);font:11.5px var(--body)}
+svg text.v{fill:var(--fg);font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--fg2);font-weight:500;position:sticky;top:0;background:var(--panel)}
+.tablewrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+.filters{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px}
+select,input{font:13px var(--body);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
+select:focus-visible,input:focus-visible{outline:2px solid var(--c-id);outline-offset:1px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+#tip{position:fixed;z-index:20;pointer-events:none;background:var(--fg);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:6px;max-width:260px;opacity:0;transition:opacity .08s}
+.badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11.5px;background:var(--grid);color:var(--fg2)}
+
+/* ---- one-screen dashboard (default view of a live report; sizes follow the viewport height so that nothing scrolls) */
+body.dash{margin:0;padding:0;height:100vh;overflow:hidden;font-size:clamp(10px,1.25vh,15px);line-height:1.35}
+#view-dash{display:none}
+body.dash #view-dash{display:grid;height:100vh;padding:.8vh .8vw;gap:.8vh .6vw;grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:auto auto auto minmax(0,.85fr) minmax(0,1.15fr)}
+body.dash #view-report{display:none}
+body.dash #tip{display:none}
+#tabs{position:fixed;right:.8vw;top:.6vh;z-index:30;display:flex;gap:6px}
+#tabs button{font:inherit;font-size:max(10px,1.1vh);padding:.3vh .9vh;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg2);cursor:pointer}
+#tabs button.on{background:var(--c-id);color:#fff;border-color:var(--c-id)}
+.d-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.7vh .7vw;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.d-panel h3{font:600 1.05em var(--head);margin:0 0 .4vh;display:flex;justify-content:space-between;align-items:baseline}
+.d-panel h3 small{font:400 .85em var(--body);color:var(--muted)}
+#d-head{grid-column:1/13;display:flex;align-items:baseline;gap:1vw;padding-right:11vw}
+#d-head h1{font:600 1.7em var(--head);margin:0}
+#d-bar{grid-column:1/13;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.6vw;align-items:center}
+#d-bar .bar{height:1.7vh;background:var(--grid);border-radius:1vh;overflow:hidden;display:flex}
+#d-bar .bar i{display:block;height:100%}
+#d-tiles{grid-column:1/13;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:.5vw}
+#d-tiles .t{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:.4vh .6vw;align-self:start}
+#d-tiles .t b{display:block;font:600 1.7em/1.1 var(--head);font-variant-numeric:tabular-nums}
+#d-tiles .t span{color:var(--fg2);font-size:.85em}
+#d-workers{grid-column:1/9}#d-chart{grid-column:9/13}
+#d-gpu{grid-column:1/5}#d-roles{grid-column:5/9}#d-latest{grid-column:9/13}
+.d-panel table{font-size:.92em}.d-panel th,.d-panel td{padding:.3vh .5vw}.d-panel th{position:static}#d-workers td,#d-workers th{padding:.42vh .5vw}
+.mini{display:inline-block;width:5.5vw;height:1.1vh;background:var(--grid);border-radius:1vh;overflow:hidden;vertical-align:middle;margin-right:.3vw}.mini i{display:block;height:100%;background:var(--c-id)}
+.rrow{display:grid;grid-template-columns:8.5vw minmax(0,1fr) 5.2vw;gap:.4vw;align-items:center;margin:.15vh 0}
+.rbar{display:flex;height:1.1vh;background:var(--grid);border-radius:1vh;overflow:hidden}.rbar i{display:block;height:100%}
+.hostk{display:flex;gap:.5vw;flex-wrap:wrap;margin-top:.4vh}.hostk div{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:.2vh .5vw}.hostk b{font-variant-numeric:tabular-nums}
+#d-chart svg{flex:1;min-height:0;width:100%;height:100%}
+.ok{color:var(--c-phy)}.bad{color:var(--c-mag)}
+
+/* ---- phones and portrait screens: the dashboard becomes one scrolling column (fixed pixel sizes, tables scroll sideways, less important columns hidden) */
+@media (max-width:900px),(max-aspect-ratio:1/1){
+  body.dash{height:auto;min-height:100vh;overflow-y:auto;overflow-x:hidden;font-size:14px;line-height:1.4}
+  body.dash #view-dash{height:auto;display:flex;flex-direction:column;gap:10px;padding:10px 10px 28px}
+  #tabs{position:sticky;top:0;right:auto;justify-content:flex-end;padding:6px 10px;background:var(--bg);border-bottom:1px solid var(--line);z-index:30}
+  #tabs button{font-size:14px;padding:7px 12px}
+  #d-head{padding-right:0;flex-wrap:wrap;gap:4px 10px}#d-head h1{font-size:20px}
+  #d-bar{grid-template-columns:1fr}#d-bar .bar{height:14px}#d-pct{font-size:15px}
+  #d-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #d-tiles .t{padding:8px 10px}#d-tiles .t b{font-size:22px}#d-tiles .t span{font-size:12px}
+  .d-panel{padding:10px;overflow:visible;display:block}.d-panel>div{overflow-x:auto}
+  .d-panel h3{font-size:15px;flex-wrap:wrap;gap:2px 8px}
+  .d-panel table{font-size:12.5px}.d-panel th,.d-panel td,#d-workers td,#d-workers th{padding:6px 8px}
+  #d-wt th:nth-child(3),#d-wt td:nth-child(3),#d-wt th:nth-child(4),#d-wt td:nth-child(4),#d-wt th:nth-child(10),#d-wt td:nth-child(10),#d-wt th:nth-child(11),#d-wt td:nth-child(11),#d-wt th:nth-child(12),#d-wt td:nth-child(12){display:none}
+  .mini{width:60px;height:9px}
+  #d-chart svg{height:210px;width:100%}
+  #d-gt th:nth-child(4),#d-gt td:nth-child(4),#d-gt th:nth-child(5),#d-gt td:nth-child(5){display:none}
+  .hostk{gap:6px}.hostk div{padding:4px 8px;font-size:13px}
+  .rrow{grid-template-columns:130px minmax(0,1fr) 70px;gap:8px;margin:5px 0}.rbar{height:10px}
+  #d-lt th:nth-child(3),#d-lt td:nth-child(3){display:none}
+}
+@media (max-width:480px){.d-panel table{font-size:12px}.d-panel th,.d-panel td,#d-workers td,#d-workers th{padding:5px 5px}.mini{width:40px;margin-right:3px}#d-wt th:nth-child(2),#d-wt td:nth-child(2){display:none}}
+/* the long report view on small screens */
+@media (max-width:700px){
+  body{padding-block:10px 32px}.wrap{gap:12px}
+  h1{font-size:21px}h2{font-size:15px}
+  .panel{padding:12px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi{padding:9px 10px}.kpi b{font-size:21px}
+  .grid2{grid-template-columns:1fr;gap:12px}
+  #view-report .panel{overflow-x:auto}#view-report svg{min-width:620px}
+  .filters{gap:8px}.filters label{flex:1 1 44%}.filters select,.filters input{width:100%}
+  th,td{padding:5px 7px}.tablewrap{max-height:340px}
+}
+</style>
+
+<div id="tabs" hidden><button id="tab-dash" class="on">Dashboard</button><button id="tab-report">Plan &amp; episodes</button></div>
+<div id="view-dash">
+  <div id="d-head"><h1 id="d-title">Generation</h1><span class="badge" id="d-state">waiting</span><span id="d-sub" style="color:var(--fg2)"></span></div>
+  <div id="d-bar"><div class="bar" id="d-barfill"></div><b id="d-pct" style="font-variant-numeric:tabular-nums"></b></div>
+  <div id="d-tiles"></div>
+  <div class="d-panel" id="d-workers"><h3>Workers <small id="d-workers-note"></small></h3><div style="min-height:0;overflow:hidden"><table id="d-wt"></table></div></div>
+  <div class="d-panel" id="d-chart"><h3>Episodes written over time <small id="d-chart-note"></small></h3><svg id="d-svg"></svg></div>
+  <div class="d-panel" id="d-gpu"><h3>GPUs and host</h3><table id="d-gt"></table><div class="hostk" id="d-host"></div></div>
+  <div class="d-panel" id="d-roles"><h3>By split role <small>done / running / queued</small></h3><div id="d-rl" style="min-height:0;overflow:hidden"></div></div>
+  <div class="d-panel" id="d-latest"><h3>Latest episodes</h3><table id="d-lt"></table></div>
+</div>
+<div class="wrap" id="view-report">
+  <header>
+    <h1 id="ttl">Dataset report</h1>
+    <p class="sub" id="lede"></p>
+  </header>
+  <div class="kpis" id="kpis"></div>
+
+  <section class="panel" id="live" hidden>
+    <h2>Generation status <span class="badge" id="lv-state">waiting</span></h2>
+    <div id="lv-bar" style="height:10px;border-radius:5px;background:var(--grid);overflow:hidden;margin:10px 0 8px"><div id="lv-fill" style="height:100%;width:0;background:var(--c-id)"></div></div>
+    <div class="kpis" id="lv-kpis"></div>
+    <p class="note" id="lv-note" style="margin:10px 0 0"></p>
+    <div class="scroll" style="margin-top:8px"><table id="lv-workers"></table></div>
+    <h2 style="margin-top:18px">Resources <span class="badge" id="rs-time"></span></h2>
+    <div class="kpis" id="rs-kpis"></div>
+    <div class="scroll" style="margin-top:8px"><table id="rs-gpus"></table></div>
+    <div class="scroll" style="margin-top:8px"><table id="rs-workers"></table></div>
+    <div class="scroll" style="margin-top:8px"><table id="lv-recent"></table></div>
+  </section>
+
+  <section class="panel">
+    <h2>What each episode is for</h2>
+    <p class="note">Split role decides how an episode is used. Colour shows the kind of distribution shift it carries: in-distribution (ID), one of five OOD wind or physics shifts, or the physics-validation set.</p>
+    <div class="legend" id="leg-split"></div>
+    <div id="ch-split"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Scenarios</h2>
+      <p class="note">Scenario template per episode. Open-loop programs excite the rotors or body rates directly; closed-loop ones track a reference.</p>
+      <div class="legend"><span><i style="background:var(--c-id)"></i>closed loop</span><span><i style="background:var(--c-mag)"></i>open loop</span></div>
+      <div id="ch-scn"></div>
+    </section>
+    <section class="panel">
+      <h2>Parts of the plan</h2>
+      <p class="note">Each part is a block of groups with its own domain sampling, wind regime and counterfactual template.</p>
+      <div class="scroll"><table id="tb-parts"></table></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Wind</h2>
+    <p class="note">Mean horizontal wind speed per episode, by wind category. The dashed line is the ID limit of 4 m/s; OOD magnitude episodes sit above it. Dots are jittered vertically only to avoid overlap.</p>
+    <div id="ch-wind"></div>
+    <div class="grid2" style="margin-top:14px">
+      <div><div class="note" style="margin-bottom:4px">Wind profile</div><div id="ch-prof"></div></div>
+      <div><div class="note" style="margin-bottom:4px">Temporal class and gust class</div><div id="ch-cls"></div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Vehicle domains</h2>
+    <p class="note">Sampled physical factors, one dot per distinct domain, relative to nominal (1.0). The shaded bands mark ID (±10 %) and the OOD shell (10–20 %). Mass is shown as a factor of the nominal 0.716 kg mass, not the base-link mass.</p>
+    <div class="legend" id="leg-dom"></div>
+    <div id="ch-dom"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Counterfactual pairs</h2>
+    <p class="note">Groups share one seed and differ in one factor. Wind-scale siblings replay the same plan at 0, 0.5 and 1.0 times the wind. Domain siblings (physics validation) keep the wind and change the vehicle.</p>
+    <div id="ch-cf"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Episodes</h2>
+    <div class="filters">
+      <label>Part <select id="f-part"></select></label>
+      <label>Split <select id="f-split"></select></label>
+      <label>Scenario <select id="f-scn"></select></label>
+      <label>Status <select id="f-status"><option value="">All</option><option>done</option><option>running</option><option>queued</option><option>pending</option><option>failed</option></select></label>
+      <label>Search <input id="f-q" type="search" placeholder="episode or group id"></label>
+      <span class="badge" id="f-count"></span>
+    </div>
+    <div class="tablewrap"><table id="tb-eps"></table></div>
+  </section>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const ROWS = __DATA__;
+const META = __META__;
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const tip = $('#tip');
+function showTip(e,html){tip.innerHTML=html;tip.style.opacity=1;const w=tip.offsetWidth,x=Math.min(e.clientX+14,innerWidth-w-8);tip.style.left=x+'px';tip.style.top=(e.clientY+14)+'px'}
+function hideTip(){tip.style.opacity=0}
+document.addEventListener('mousemove',e=>{const t=e.target.closest('[data-tip]');t?showTip(e,t.dataset.tip):hideTip()});
+const count=(a,f)=>{const m=new Map();a.forEach(r=>{const k=f(r);m.set(k,(m.get(k)||0)+1)});return m};
+const sum=a=>a.reduce((s,x)=>s+x,0);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* categories of distribution shift */
+const CAT=[['id','In-distribution','--c-id'],['magnitude','OOD magnitude','--c-mag'],['direction','OOD direction','--c-dir'],['temporal','OOD temporal','--c-tmp'],['gust','OOD gust','--c-gst'],['physics','OOD physics','--c-phy'],['trajectory','OOD trajectory','--c-trj'],['val','Physics validation','--c-val']];
+const catOf=s=>s==='train'||s.endsWith('_id')?'id':s==='physics_validation'?'val':s.split('_').pop();
+const catVar=Object.fromEntries(CAT.map(c=>[c[0],c[2]]));
+const catName=Object.fromEntries(CAT.map(c=>[c[0],c[1]]));
+
+/* header */
+const nGroups=new Set(ROWS.map(r=>r.grp)).size, nCfGroups=new Set(ROWS.filter(r=>r.cf!=='none').map(r=>r.grp)).size, nDom=new Set(ROWS.map(r=>r.dom)).size;
+const hours=sum(ROWS.map(r=>r.dur))/3600;
+const idxNote=META.has_index?`index.json: ${META.n_written} of ${META.n_planned} written${META.n_failed?', '+META.n_failed+' failed':''}, ${META.in_progress?'run in progress':META.complete?'complete':'incomplete'}; validation ${!META.validated?'pending':META.validation_ok?'passed':'reported '+META.hard+' hard / '+META.soft+' soft findings'}.`:'index.json not written yet (it is created when the run starts).';
+$('#lede').textContent=`${META.dataset_id} v${META.dataset_version}: ${ROWS.length} planned episodes in ${nGroups} groups (${nCfGroups} with counterfactual siblings), drawn from ${new Set(ROWS.map(r=>r.part)).size} parts. ${idxNote}`;
+$('#kpis').innerHTML=[[ROWS.length,'episodes'],[nGroups,'groups'],[nDom,'distinct vehicle domains'],[sum(ROWS.map(r=>r.n)).toLocaleString(),'planned physics steps (200 Hz)'],[hours.toFixed(2)+' h','planned simulated time'],[ROWS.filter(r=>r.dt==='open_loop').length,'open-loop episodes'],[ROWS.filter(r=>r.cf!=='none').length,'counterfactual episodes']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+
+/* generic horizontal bar chart: rows = [{label,value,color,tip}] */
+function hbar(el,rows,{labelW=170,max}={}){
+  const W=640,rh=24,top=4,H=top+rows.length*rh+4,mx=max||Math.max(...rows.map(r=>r.value)),pw=W-labelW-44;
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  rows.forEach((r,i)=>{const y=top+i*rh,w=Math.max(2,r.value/mx*pw);
+    s+=`<text x="${labelW-8}" y="${y+rh/2+4}" text-anchor="end">${esc(r.label)}</text>`;
+    s+=`<g data-tip="${esc(r.tip||r.label+': '+r.value)}"><rect x="${labelW}" y="${y+3}" width="${pw}" height="${rh-6}" fill="transparent"/><path d="M${labelW} ${y+4}h${w-4}a4 4 0 0 1 4 4v${rh-14}a4 4 0 0 1-4 4h-${w-4}z" fill="${r.color}"/></g>`;
+    s+=`<text class="v" x="${labelW+w+6}" y="${y+rh/2+4}">${r.value}</text>`});
+  el.innerHTML=s+'</svg>';
+}
+
+function draw(){
+/* splits */
+const order=['train','val_id','test_id','val_ood_magnitude','test_ood_magnitude','val_ood_direction','test_ood_direction','val_ood_temporal','test_ood_temporal','val_ood_gust','test_ood_gust','val_ood_physics','test_ood_physics','test_ood_trajectory','physics_validation'];
+const sc=count(ROWS,r=>r.split);
+$('#leg-split').innerHTML=CAT.map(c=>`<span><i style="background:var(${c[2]})"></i>${c[1]}</span>`).join('');
+hbar($('#ch-split'),order.filter(k=>sc.has(k)).map(k=>({label:k,value:sc.get(k),color:css('--c-'+({id:'id',magnitude:'mag',direction:'dir',temporal:'tmp',gust:'gst',physics:'phy',trajectory:'trj',val:'val'})[catOf(k)]),tip:`${k}: ${sc.get(k)} episodes (${catName[catOf(k)]})`})),{labelW:170});
+
+/* scenarios */
+const scn=[...count(ROWS,r=>r.scn)].sort((a,b)=>b[1]-a[1]);
+const dtOf=t=>ROWS.find(r=>r.scn===t).dt;
+hbar($('#ch-scn'),scn.map(([k,v])=>({label:k,value:v,color:css(dtOf(k)==='open_loop'?'--c-mag':'--c-id'),tip:`${k}: ${v} episodes`})),{labelW:170});
+
+/* wind strip */
+const WC=[['id','ID'],['ood_magnitude','OOD magnitude'],['ood_direction','OOD direction'],['ood_temporal','OOD temporal'],['ood_gust','OOD gust']];
+const WW=860,wl=120,wr=24,rh=44,wt=10,xmax=Math.ceil(Math.max(...ROWS.map(r=>r.wm))+1),px=v=>wl+v/xmax*(WW-wl-wr),WH=wt+WC.length*rh+30;
+let s=`<svg viewBox="0 0 ${WW} ${WH}" role="img">`;
+for(let t=0;t<=xmax;t+=2){s+=`<line x1="${px(t)}" x2="${px(t)}" y1="${wt}" y2="${WH-24}" stroke="${css('--grid')}"/><text x="${px(t)}" y="${WH-8}" text-anchor="middle">${t}</text>`}
+s+=`<text x="${WW-wr}" y="${WH-8}" text-anchor="end">mean horizontal wind, m/s</text>`;
+s+=`<line x1="${px(4)}" x2="${px(4)}" y1="${wt}" y2="${WH-24}" stroke="${css('--fg2')}" stroke-dasharray="4 3"/>`;
+WC.forEach(([k,lab],i)=>{const cy=wt+i*rh+rh/2;
+  s+=`<text x="${wl-10}" y="${cy+4}" text-anchor="end">${lab}</text>`;
+  const sub=ROWS.filter(r=>r.wc===k);
+  sub.forEach((r,j)=>{const jit=((j*37)%11-5)*1.6;
+    s+=`<circle cx="${px(r.wm)}" cy="${cy+jit}" r="4.5" fill="${css(k==='id'?'--c-id':{ood_magnitude:'--c-mag',ood_direction:'--c-dir',ood_temporal:'--c-tmp',ood_gust:'--c-gst'}[k])}" stroke="${css('--panel')}" stroke-width="1.5" data-tip="${esc(r.id)}<br>${esc(r.wp)} wind, ${r.wm.toFixed(2)} m/s mean, ${r.wpk.toFixed(2)} peak<br>${esc(r.tmp)} / gust: ${esc(r.gust)}"/>`})});
+$('#ch-wind').innerHTML=s+'</svg>';
+hbar($('#ch-prof'),[...count(ROWS,r=>r.wp)].sort((a,b)=>b[1]-a[1]).map(([k,v])=>({label:k,value:v,color:css('--c-id'),tip:`${k}: ${v}`})),{labelW:110});
+const cls=[...[...count(ROWS,r=>r.tmp)].map(([k,v])=>({label:'temporal: '+k,value:v,color:css('--c-tmp'),tip:`temporal ${k}: ${v}`})),...[...count(ROWS,r=>r.gust)].map(([k,v])=>({label:'gust: '+k,value:v,color:css('--c-gst'),tip:`gust ${k}: ${v}`}))];
+hbar($('#ch-cls'),cls,{labelW:130});
+
+/* domains */
+const doms=[...new Map(ROWS.map(r=>[r.dom,r])).values()];
+const regCol={id:'--c-id',ood_physics:'--c-phy',ood_combination:'--c-mag',nominal:'--c-val'}, regName={id:'ID',ood_physics:'OOD physics',ood_combination:'OOD combination (physics + wind)',nominal:'Nominal'};
+$('#leg-dom').innerHTML=Object.keys(regCol).map(k=>`<span><i style="background:var(${regCol[k]})"></i>${regName[k]} (${doms.filter(d=>d.reg===k).length})</span>`).join('');
+const F=[['mass','mass'],['force_scale','thrust coefficient k_F'],['km_kf_ratio','torque/thrust ratio'],['motor_time_constant','motor time constant'],['rotor_drag_scale','rotor drag scale'],['body_drag_scale','body drag scale'],['inertia_shape_x','inertia shape x'],['inertia_shape_y','inertia shape y'],['inertia_shape_z','inertia shape z']];
+const lo=Math.min(0.75,...doms.flatMap(d=>F.map(([k])=>d.f[k]))),hi=Math.max(1.25,...doms.flatMap(d=>F.map(([k])=>d.f[k])));
+const DW=860,dl=170,dr=24,drh=34,dt_=6,dx=v=>dl+(v-lo)/(hi-lo)*(DW-dl-dr),DH=dt_+F.length*drh+26;
+s=`<svg viewBox="0 0 ${DW} ${DH}" role="img"><rect x="${dx(0.8)}" width="${dx(1.2)-dx(0.8)}" y="${dt_}" height="${F.length*drh}" fill="var(--band2)"/><rect x="${dx(0.9)}" width="${dx(1.1)-dx(0.9)}" y="${dt_}" height="${F.length*drh}" fill="var(--band1)"/>`;
+for(let t=Math.ceil(lo*20)/20;t<=hi+1e-9;t+=0.05){const major=Math.abs(t*10-Math.round(t*10))<1e-6;if(major)s+=`<text x="${dx(t)}" y="${DH-8}" text-anchor="middle">${t.toFixed(1)}</text>`}
+s+=`<line x1="${dx(1)}" x2="${dx(1)}" y1="${dt_}" y2="${dt_+F.length*drh}" stroke="${css('--fg2')}" stroke-dasharray="4 3"/>`;
+F.forEach(([k,lab],i)=>{const cy=dt_+i*drh+drh/2;s+=`<text x="${dl-10}" y="${cy+4}" text-anchor="end">${lab}</text>`;
+  doms.forEach((d,j)=>{const jit=((j*53)%9-4)*1.7;s+=`<circle cx="${dx(d.f[k])}" cy="${cy+jit}" r="3.6" fill="${css(regCol[d.reg])}" fill-opacity=".85" stroke="${css('--panel')}" stroke-width="1" data-tip="${esc(d.dom)} (${regName[d.reg]})<br>${lab}: ${d.f[k].toFixed(3)} × nominal<br>mass ${d.mass} kg"/>`})});
+$('#ch-dom').innerHTML=s+'</svg>';
+
+/* counterfactuals */
+const ck=count(ROWS.filter(r=>r.cf!=='none'),r=>r.cf), nGrp=new Set(ROWS.filter(r=>r.cf!=='none').map(r=>r.grp)).size;
+hbar($('#ch-cf'),[...ck].map(([k,v])=>({label:k,value:v,color:css(k==='baseline'?'--c-id':k==='wind-scale sibling'?'--c-mag':'--c-phy'),tip:`${k}: ${v} episodes`})).concat([{label:'no counterfactual',value:ROWS.filter(r=>r.cf==='none').length,color:css('--c-val'),tip:'stand-alone episodes'}]),{labelW:170});
+}
+
+/* parts table */
+const parts=[...new Set(ROWS.map(r=>r.part))];
+$('#tb-parts').innerHTML='<tr><th>Part</th><th>Episodes</th><th>Groups</th><th>Type</th><th>Domain region</th><th>Wind</th></tr>'+parts.map(p=>{const a=ROWS.filter(r=>r.part===p),u=k=>[...new Set(a.map(r=>r[k]))].join(', ');return `<tr><td>${p}</td><td>${a.length}</td><td>${new Set(a.map(r=>r.grp)).size}</td><td>${u('dt').replace(/_/g,' ')}</td><td>${u('reg')}</td><td>${u('wc').replace(/_/g,' ')}</td></tr>`}).join('');
+
+/* episode table */
+const opt=(el,vals)=>el.innerHTML='<option value="">All</option>'+vals.map(v=>`<option>${esc(v)}</option>`).join('');
+opt($('#f-part'),parts);opt($('#f-split'),[...new Set(ROWS.map(r=>r.split))]);opt($('#f-scn'),[...new Set(ROWS.map(r=>r.scn))].sort());
+const stOf=r=>r.failed?'failed':r.written?'done':r.live==='running'?'running':r.live==='queued'?'queued':(META.has_index||META.live)?'pending':'';
+const STCOL={done:'--c-id',running:'--c-mag',queued:'--c-val',pending:'--fg2',failed:'--c-phy'};
+const stPill=r=>{const k=stOf(r);if(!k)return '—';const extra=k==='done'&&r.status&&r.status!=='completed'?' ('+esc(r.status)+')':'';return `<span class="dot" style="background:var(${STCOL[k]})"></span>${k}${extra}`};
+function table(){
+  const p=$('#f-part').value,sp=$('#f-split').value,sn=$('#f-scn').value,q=$('#f-q').value.trim().toLowerCase(),fs=$('#f-status').value;
+  const a=ROWS.filter(r=>(!p||r.part===p)&&(!sp||r.split===sp)&&(!sn||r.scn===sn)&&(!fs||stOf(r)===fs)&&(!q||r.id.toLowerCase().includes(q)||r.grp.toLowerCase().includes(q)));
+  $('#f-count').textContent=a.length+' of '+ROWS.length;
+  $('#tb-eps').innerHTML='<tr><th>Episode</th><th>Split</th><th>Scenario</th><th>Controller</th><th>Wind</th><th>Mean wind m/s</th><th>Domain</th><th>Duration s</th><th>Counterfactual</th><th>Status</th></tr>'+a.map(r=>`<tr><td>${r.id}</td><td><span class="dot" style="background:var(${catVar[catOf(r.split)]})"></span>${r.split}</td><td>${r.scn}</td><td>${r.ctrl}</td><td>${r.wp}</td><td>${r.wm.toFixed(2)}</td><td>${r.reg}</td><td>${r.dur.toFixed(1)}</td><td>${r.cf}${r.replay?' (replay)':''}</td><td>${stPill(r)}</td></tr>`).join('');
+}
+['#f-part','#f-split','#f-scn'].forEach(i=>$(i).addEventListener('change',table));$('#f-q').addEventListener('input',table);
+$('#ttl').textContent=META.dataset_id+' dataset report';document.title=META.dataset_id+' dataset report';
+draw();table();
+/* live mode: follow index.json while the generator runs */
+let LIVE_TIMER=null;
+function fmt(sec){sec=Math.max(0,Math.round(sec));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return (h?h+'h ':'')+(m||h?m+'m ':'')+s+'s'}
+function applyIndex(idx,age){
+  const st=new Map(idx.episodes.map(e=>[e.episode_id,e.status])), bad=new Set((idx.failures||[]).map(f=>f.episode_id));
+  const run=new Set(idx.running||[]),que=new Set(idx.queued||[]);
+  ROWS.forEach(r=>{r.status=st.get(r.id)||null;r.written=st.has(r.id);r.failed=bad.has(r.id);r.live=run.has(r.id)?'running':que.has(r.id)?'queued':null});
+  const n=idx.n_written,nf=(idx.failures||[]).length,total=idx.n_planned,done=n+nf,term=idx.episodes.filter(e=>e.status!=='completed').length;
+  const stale=idx.in_progress&&age>120, state=idx.in_progress?(stale?'no update for '+fmt(age)+' (run may have stopped)':'running'):(idx.complete?'complete':'finished with problems');
+  $('#lv-state').textContent=state;
+  $('#lv-fill').style.width=(100*done/total)+'%';
+  $('#lv-fill').style.background=nf||stale?css('--c-mag'):css('--c-id');
+  const wall=idx.generation_wall_s||0, rate=n?wall/n:0, eta=idx.in_progress&&rate?(total-done)*rate:0;
+  const nRun=(idx.running||[]).length,nQue=(idx.queued||[]).length,nPend=Math.max(total-done-nRun-nQue,0);
+  $('#lv-kpis').innerHTML=[[n+' / '+total,'done'],[nRun,'running now'],[nQue,'queued (assigned to a running worker)'],[nPend,'pending (not assigned to a running worker)'],[nf,'failed'],[term,'ended early (e.g. ground contact)'],[fmt(wall),'elapsed (this invocation)'],[idx.in_progress&&eta?fmt(eta):'—','estimated time left']].map(([b,s])=>`<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+  $('#lv-note').textContent=(idx.validation&&idx.validation.ok!==null?'Validation: '+(idx.validation.ok?'passed':idx.validation.hard+' hard / '+idx.validation.soft+' soft findings')+'. ':'Validation runs when generation ends. ')+(nf?'Failed: '+idx.failures.map(f=>f.episode_id+' ('+f.error+')').join(', ')+'.':'');
+  $('#lv-recent').innerHTML='<tr><th>Latest episodes</th><th>Status</th><th>Steps</th></tr>'+idx.episodes.slice(-6).reverse().map(e=>`<tr><td>${esc(e.episode_id)}</td><td>${esc(e.status)}</td><td>${e.n_steps??''}</td></tr>`).join('');
+  $('#lv-workers').innerHTML=(idx.workers||[]).length?'<tr><th>Worker</th><th>GPU</th><th>State</th><th>Done</th><th>Queued</th><th>Assigned</th><th>Running episode</th></tr>'+idx.workers.map(w=>`<tr><td>${w.worker}</td><td>${w.gpu}</td><td>${w.alive?'running':'not running'}</td><td>${w.done}</td><td>${w.queued}</td><td>${w.assigned}</td><td>${esc(w.current||'—')}</td></tr>`).join(''):'';
+  table();
+  LASTIDX=idx;if(document.body.classList.contains('dash'))renderDash();
+  return idx.in_progress;
+}
+async function poll(){
+  let again=true;
+  try{
+    const r=await fetch('index.json',{cache:'no-store'});
+    if(r.ok){again=applyIndex(await r.json(),parseFloat(r.headers.get('X-Index-Age-S')||'0'));$('#live').hidden=false}
+    else{$('#live').hidden=false;$('#lv-state').textContent='waiting for the run to start'}
+  }catch(e){$('#live').hidden=false;$('#lv-state').textContent='server not reachable'}
+  clearTimeout(LIVE_TIMER);LIVE_TIMER=setTimeout(poll,again?5000:30000);
+}
+function applyStats(s){
+  LASTSTATS=s;if(document.body.classList.contains('dash'))renderDash();
+  const f=(v,d=1)=>v==null||!isFinite(v)?'—':(+v).toFixed(d), gb=v=>f(v,2)+' GB';
+  $('#rs-time').textContent='updated '+s.time;
+  const dk=s.disk,ho=s.host,ou=s.ours;
+  $('#rs-kpis').innerHTML=[[gb(dk.shards_gb),'dataset on disk (shards)'],[dk.projected_total_gb?gb(dk.projected_total_gb):'—','projected total at '+f(dk.per_episode_mb,2)+' MB / episode'],[f(dk.volume_free_gb,0)+' GB','free on the data volume (of '+f(dk.volume_total_gb,0)+')'],
+   [f(ou.cpu_cores,1),'CPU cores busy (our workers)'],[f(ho.load1,0),'host load average (1 min), '+ho.cores+' cores'],[gb(ou.ram_gb),'RAM, our workers'],[f(ho.ram_available_gb,0)+' GB','RAM available on the host (of '+f(ho.ram_total_gb,0)+')']].map(([b,t])=>`<div class="kpi"><b>${b}</b><span>${t}</span></div>`).join('');
+  $('#rs-gpus').innerHTML='<tr><th>GPU</th><th>Utilisation</th><th>Memory used</th><th>Temperature</th><th>Power</th><th>Our workers</th></tr>'+s.gpus.map(g=>{const ws=s.workers.filter(w=>w.gpu===g.index);return `<tr><td>${g.index}</td><td>${f(g.util,0)} %</td><td>${f(g.mem_used_mb/1024,1)} / ${f(g.mem_total_mb/1024,0)} GB</td><td>${f(g.temp_c,0)} °C</td><td>${f(g.power_w,0)} W</td><td>${ws.length?ws.map(w=>w.worker).join(', ')+' ('+f(ws.reduce((a,w)=>a+(w.gpu_mem_mb||0),0)/1024,1)+' GB)':'none'}</td></tr>`}).join('');
+  $('#rs-workers').innerHTML='<tr><th>Worker</th><th>PID</th><th>GPU</th><th>RAM</th><th>CPU</th><th>Threads</th><th>GPU memory</th><th>Now running</th><th>Progress</th><th>On it / typical</th><th>Episodes</th><th>Per hour</th><th>Disk</th></tr>'+s.workers.map(w=>`<tr><td>${w.worker}</td><td>${w.pid||'—'}</td><td>${w.gpu==null?'—':w.gpu}</td><td>${w.alive?gb(w.rss_gb):'—'}</td><td>${w.cpu_pct==null?'—':f(w.cpu_pct,0)+' %'}</td><td>${w.threads||'—'}</td><td>${w.gpu_mem_mb==null?'—':f(w.gpu_mem_mb,0)+' MB'}</td><td>${esc(w.ep_id||'—')}</td><td>${w.ep_pct==null?'—':(w.ep_exact?w.ep_step+' / '+w.ep_steps+' steps ('+f(w.ep_pct,0)+' %)':'~'+f(w.ep_pct,0)+' % (estimate)')}</td><td>${w.ep_elapsed_s==null?'—':fmt(w.ep_elapsed_s)+' / '+(w.ep_typical_s==null?'—':fmt(w.ep_typical_s))}</td><td>${w.episodes}</td><td>${w.rate_per_h==null?'—':f(w.rate_per_h,0)}</td><td>${f(w.disk_mb,0)} MB</td></tr>`).join('')
+   +`<tr><td><b>total</b></td><td></td><td></td><td><b>${gb(ou.ram_gb)}</b></td><td><b>${ou.cpu_cores==null?'—':f(ou.cpu_cores*100,0)+' %'}</b></td><td><b>${s.workers.reduce((a,w)=>a+(w.threads||0),0)}</b></td><td><b>${f(s.workers.reduce((a,w)=>a+(w.gpu_mem_mb||0),0),0)} MB</b></td><td></td><td></td><td></td><td><b>${s.written}</b></td><td><b>${f(s.workers.reduce((a,w)=>a+(w.rate_per_h||0),0),0)}</b></td><td><b>${f(s.workers.reduce((a,w)=>a+w.disk_mb,0),0)} MB</b></td></tr>`;
+}
+async function pollStats(){
+  try{const r=await fetch('stats.json',{cache:'no-store'});if(r.ok)applyStats(await r.json())}catch(e){}
+  setTimeout(pollStats,5000);
+}
+
+/* ---- dashboard */
+let LASTIDX=null,LASTSTATS=null;
+const dF=(v,d=1)=>v==null||!isFinite(v)?'—':(+v).toFixed(d);
+function histRate(hist){if(!hist||hist.length<2)return null;const a=hist[0],b=hist[hist.length-1];return b[0]-a[0]>120&&b[1]>a[1]?(b[1]-a[1])/(b[0]-a[0])*3600:null}
+function dashChart(hist,total){
+  const svg=$('#d-svg'),W=svg.clientWidth||400,H=svg.clientHeight||200,m={l:42,r:8,t:6,b:20};
+  const rate=histRate(hist);
+  if(!hist||hist.length<2){svg.innerHTML='';$('#d-chart-note').textContent='collecting data ...';return}
+  const t0=hist[0][0],last=hist[hist.length-1],tEnd=rate&&last[1]<total?last[0]+(total-last[1])/rate*3600:last[0],tMax=Math.max(tEnd,last[0]+1);
+  const x=t=>m.l+(t-t0)/Math.max(tMax-t0,1)*(W-m.l-m.r),y=n=>H-m.b-n/total*(H-m.t-m.b);
+  let o='';[0,.25,.5,.75,1].forEach(f=>{const yy=y(total*f);o+=`<line x1="${m.l}" x2="${W-m.r}" y1="${yy}" y2="${yy}" stroke="var(--grid)"/><text x="${m.l-4}" y="${yy+3}" text-anchor="end">${Math.round(total*f)}</text>`});
+  o+=`<polyline fill="none" stroke="var(--c-id)" stroke-width="2.2" points="${hist.map(p=>x(p[0]).toFixed(1)+','+y(p[1]).toFixed(1)).join(' ')}"/>`;
+  if(rate&&last[1]<total)o+=`<line x1="${x(last[0])}" y1="${y(last[1])}" x2="${x(tEnd)}" y2="${y(total)}" stroke="var(--c-mag)" stroke-width="1.6" stroke-dasharray="5 4"/><text x="${W-m.r}" y="${y(total)-4}" text-anchor="end" style="fill:var(--c-mag)">projected finish ${new Date(tEnd*1000).toTimeString().slice(0,5)}</text>`;
+  const fmtT=t=>new Date(t*1000).toTimeString().slice(0,5);
+  o+=`<text x="${m.l}" y="${H-5}">${fmtT(t0)}</text>${x(last[0])-m.l>70&&x(last[0])<W-m.r-70?`<text x="${x(last[0])}" y="${H-5}" text-anchor="middle">now ${fmtT(last[0])}</text>`:''}<text x="${W-m.r}" y="${H-5}" text-anchor="end">${rate?fmtT(tEnd):''}</text>`;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.innerHTML=o;$('#d-chart-note').textContent=dF(rate,0)+' episodes / h (since '+fmtT(t0)+')';
+}
+function renderDash(){
+  const idx=LASTIDX;if(!idx)return;const s=LASTSTATS;
+  const total=idx.n_planned,n=idx.n_written,nf=(idx.failures||[]).length,nRun=(idx.running||[]).length,nQue=(idx.queued||[]).length,nPend=Math.max(total-n-nf-nRun-nQue,0);
+  const term=idx.episodes.filter(e=>e.status!=='completed').length;
+  const rate=s?((s.workers.reduce((a,w)=>a+(w.rate_per_h||0),0)||null)||histRate(s.history)):null;
+  const left=total-n-nf,eta=rate?left/rate*3600:null;
+  $('#d-title').textContent=META.dataset_id;
+  $('#d-state').textContent=idx.in_progress?'running':(idx.complete?'complete':'stopped / incomplete');
+  $('#d-sub').textContent=(s?s.ours.workers_alive+' workers running · ':'')+'elapsed '+fmt(idx.generation_wall_s||0)+(eta?' · ETA '+fmt(eta):'')+(s?' · updated '+s.time:'');
+  const pd=100*n/total,pr=100*nRun/total,pq=100*nQue/total;
+  $('#d-barfill').innerHTML=`<i style="width:${pd}%;background:var(--c-id)"></i><i style="width:${pr}%;background:var(--c-mag)"></i><i style="width:${pq}%;background:var(--grid)"></i>`;
+  $('#d-pct').textContent=n+' / '+total+'  ('+dF(pd,1)+' %)';
+  const T=(b,t)=>`<div class="t"><b>${b}</b><span>${t}</span></div>`;
+  $('#d-tiles').innerHTML=T(n,'done')+T(nRun,'running now')+T(nQue,'queued')+T(nPend,'pending')+T(nf,'failed')+T(term,'ended early')+T(rate?dF(rate,0):'—','episodes / hour')+T(eta?fmt(eta):'—','time left')+T(s?dF(s.disk.shards_gb,2)+' GB':'—','on disk'+(s&&s.disk.projected_total_gb?' → '+dF(s.disk.projected_total_gb,1)+' GB':''))+T(s?dF(s.ours.cpu_cores,0)+' cores':'—','CPU, our workers');
+  // workers
+  if(s){
+    const cur=new Map((idx.workers||[]).map(x=>[x.worker,x.current]));
+    const rows=s.workers.map(w=>{const pct=w.ep_pct,txt=pct==null?'—':(w.ep_exact?w.ep_step+'/'+w.ep_steps+' steps':'~'+dF(pct,0)+' %');
+      return `<tr><td>${w.worker}</td><td>${w.gpu==null?'—':w.gpu}</td><td class="${w.alive?'ok':'bad'}">${w.alive?'running':'stopped'}</td><td>${esc(w.ep_id||cur.get(w.worker)||'—')}</td><td><span class="mini"><i style="width:${pct==null?0:Math.min(pct,100)}%"></i></span>${txt}</td><td>${w.ep_elapsed_s==null?'—':fmt(w.ep_elapsed_s)} / ${w.ep_typical_s==null?'—':fmt(w.ep_typical_s)}</td><td>${w.episodes}</td><td>${dF(w.rate_per_h,0)}</td><td>${w.alive?dF(w.rss_gb,1):'—'}</td><td>${w.cpu_pct==null?'—':dF(w.cpu_pct,0)+' %'}</td><td>${w.gpu_mem_mb==null?'—':dF(w.gpu_mem_mb,0)}</td><td>${dF(w.disk_mb,0)}</td></tr>`}).join('');
+    const sum=(f)=>s.workers.reduce((a,w)=>a+(f(w)||0),0);
+    $('#d-wt').innerHTML='<tr><th>#</th><th>GPU</th><th>State</th><th>Episode now</th><th>Progress</th><th>On it / typical</th><th>Done</th><th>/h</th><th>RAM GB</th><th>CPU</th><th>GPU MB</th><th>Disk MB</th></tr>'+rows+`<tr><td><b>Σ</b></td><td></td><td></td><td></td><td></td><td></td><td><b>${s.written}</b></td><td><b>${dF(sum(w=>w.rate_per_h),0)}</b></td><td><b>${dF(sum(w=>w.rss_gb),1)}</b></td><td><b>${dF(sum(w=>w.cpu_pct),0)} %</b></td><td><b>${dF(sum(w=>w.gpu_mem_mb),0)}</b></td><td><b>${dF(sum(w=>w.disk_mb),0)}</b></td></tr>`;
+    $('#d-workers-note').textContent=s.workers.some(w=>w.ep_exact)?'exact step progress':'progress is estimated (workers started before progress files existed)';
+    $('#d-gt').innerHTML='<tr><th>GPU</th><th>Util</th><th>Memory</th><th>Temp</th><th>Power</th><th>Ours</th></tr>'+s.gpus.map(g=>{const ws=s.workers.filter(w=>w.gpu===g.index);return `<tr><td>${g.index}</td><td>${dF(g.util,0)} %</td><td>${dF(g.mem_used_mb/1024,1)}/${dF(g.mem_total_mb/1024,0)}</td><td>${dF(g.temp_c,0)}°</td><td>${dF(g.power_w,0)} W</td><td>${ws.length?ws.map(w=>w.worker).join(','):'—'}</td></tr>`}).join('');
+    const ho=s.host,dk=s.disk;
+    $('#d-host').innerHTML=`<div>load <b>${dF(ho.load1,0)}</b> / ${ho.cores} cores</div><div>RAM free <b>${dF(ho.ram_available_gb,0)}</b> / ${dF(ho.ram_total_gb,0)} GB</div><div>ours <b>${dF(s.ours.ram_gb,0)}</b> GB</div><div>disk free <b>${dF(dk.volume_free_gb,0)}</b> GB</div>`;
+    dashChart(s.history,total);
+  }
+  // roles
+  const roles=[...new Set(ROWS.map(r=>r.split))],col={done:'--c-id',running:'--c-mag'};
+  $('#d-rl').innerHTML=roles.map(k=>{const a=ROWS.filter(r=>r.split===k),d=a.filter(r=>r.written).length,ru=a.filter(r=>r.live==='running').length,q=a.filter(r=>r.live==='queued').length,N=a.length;
+    return `<div class="rrow"><span title="${esc(k)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k)}</span><div class="rbar"><i style="width:${100*d/N}%;background:var(--c-id)"></i><i style="width:${100*ru/N}%;background:var(--c-mag)"></i><i style="width:${100*q/N}%;background:var(--muted);opacity:.35"></i></div><span style="text-align:right;font-variant-numeric:tabular-nums">${d}/${N}</span></div>`}).join('');
+  // latest
+  $('#d-lt').innerHTML='<tr><th>Episode</th><th>Role</th><th>Scenario</th><th>Status</th></tr>'+idx.episodes.slice(-8).reverse().map(e=>{const r=ROWS.find(x=>x.id===e.episode_id)||{};return `<tr><td>${esc(e.episode_id)}</td><td>${esc(r.split||'')}</td><td>${esc(r.scn||'')}</td><td>${esc(e.status)}</td></tr>`}).join('');
+}
+function setView(v){document.body.classList.toggle('dash',v==='dash');$('#tab-dash').classList.toggle('on',v==='dash');$('#tab-report').classList.toggle('on',v!=='dash');if(v!=='dash')draw();else renderDash();try{history.replaceState(null,'',v==='dash'?'#dashboard':'#report')}catch(e){}}
+if(META.live){$('#tabs').hidden=false;$('#tab-dash').onclick=()=>setView('dash');$('#tab-report').onclick=()=>setView('report');setView(location.hash==='#report'?'report':'dash');addEventListener('resize',()=>{if(document.body.classList.contains('dash'))renderDash()})}
+if(META.live)poll();
+if(META.live)pollStats();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
+new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+</script>

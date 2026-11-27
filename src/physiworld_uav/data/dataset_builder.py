@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -35,8 +35,25 @@ ACTION_KEYS = {
     "rotor_cmd": ("actions/rotor_cmd", "held"),
     "rotor_speed_cmd": ("actions/rotor_speed_cmd", "held"),
 }
-AUX_FIELDS = ("environment/wind_W", "environment/wind_applied_W",
+AUX_FIELDS = ("environment/wind_W", "environment/wind_applied_W", "environment/wind_rotor_W",
               "ground_truth/wrench/external_force_W", "ground_truth/wrench/external_torque_B")
+
+
+def dataset_sim(dataset_dir) -> dict:
+    """``{"control_decimation": int, "model_dt": float}`` of a dataset, from the first row of its manifest (the plan fixes them for every
+    episode). A dataset or test fixture without a manifest gets the 50 Hz defaults (decimation 4, 0.02 s)."""
+    import json
+    from pathlib import Path
+    try:
+        with (Path(dataset_dir) / "manifest.jsonl").open() as f:
+            sim = json.loads(f.readline())["sim"]
+        return {"control_decimation": int(sim["control_decimation"]), "model_dt": float(sim["model_dt"])}
+    except (OSError, KeyError, ValueError, TypeError):
+        return {"control_decimation": 4, "model_dt": 0.02}
+
+
+def dataset_decimation(dataset_dir) -> int:
+    return dataset_sim(dataset_dir)["control_decimation"]
 
 
 @dataclass(frozen=True)
@@ -49,6 +66,13 @@ class BuilderConfig:
     obs_mode: str = "instant"         # instant | interval_mean
     statuses: tuple[str, ...] = ("completed",)
     exclude_open_loop_kinds: tuple[str, ...] = ("body_wrench",)
+    # Episodes that ended early (``terminated_ground`` = ground contact, ``terminated_envelope`` = left the force-model envelope) are valid
+    # physics up to their last steps. ``extra_statuses`` makes them eligible, but ONLY in the roles of ``extra_status_roles`` (default: the
+    # training role), so validation and test sets keep ``statuses`` only. ``tail_trim`` drops the last k model steps of episodes with the given
+    # status (a ground-contact episode ends with the impact, which the model does not describe).
+    extra_statuses: tuple[str, ...] = ()
+    extra_status_roles: tuple[str, ...] = ("train",)
+    tail_trim: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
         if self.action_key not in ACTION_KEYS:
@@ -70,6 +94,9 @@ class BuilderConfig:
             obs_mode=str(cfg_get(cfg, "obs_mode", "instant")),
             statuses=tuple(cfg_get(cfg, "statuses", ("completed",))),
             exclude_open_loop_kinds=tuple(cfg_get(cfg, "exclude_open_loop_kinds", ("body_wrench",))),
+            extra_statuses=tuple(cfg_get(cfg, "extra_statuses", ())),
+            extra_status_roles=tuple(cfg_get(cfg, "extra_status_roles", ("train",))),
+            tail_trim=tuple((str(k), int(v)) for k, v in dict(cfg_get(cfg, "tail_trim", {})).items()),
         )
 
 
@@ -83,10 +110,33 @@ class ModelEpisode:
     actions: np.ndarray
     dt: float
     aux: dict[str, np.ndarray] = field(default_factory=dict)
+    vehicle: np.ndarray | None = None       # (12,) true vehicle parameters, see vehicle_vector(); None for synthetic episodes
 
     @property
     def n_steps(self) -> int:
         return int(self.actions.shape[0])
+
+
+VEHICLE_DIM = 12
+
+
+def vehicle_vector(meta: EpisodeMetadata) -> np.ndarray | None:
+    """The vehicle parameters the simulator actually used, as the model's physics prior needs them:
+    ``[mass (1), force constants k_F (4), moment constants k_M (4), effective inertia Ixx, Iyy, Izz (3)]`` (SI units).
+    Read from the PhysX read-back (``drone_realised``): total mass, k_F, k_M and the effective composite inertia that the controllers
+    and the dynamics see (rotor links included). Aerodynamic scales and the motor time constant are NOT part of it.
+    None when the dataset has no such read-back (older datasets); models that need the vehicle then raise a clear error."""
+    r = meta.drone_realised
+    if not r or "force_constants" not in r or "moment_constants" not in r:
+        return None
+    J = np.asarray(r["composite_inertia_effective_kgm2"], dtype=np.float64)
+    off = np.abs(J - np.diag(np.diag(J))).max()
+    if off > 1e-6:
+        raise ValueError(f"{meta.episode_id}: effective inertia has off-diagonal terms ({off:.2e}); the model assumes a diagonal inertia")
+    kf, km = np.asarray(r["force_constants"], dtype=np.float64), np.asarray(r["moment_constants"], dtype=np.float64)
+    if kf.shape != (4,) or km.shape != (4,):
+        raise ValueError(f"{meta.episode_id}: expected 4 rotors")
+    return np.concatenate([[float(r["total_mass_kg"])], kf, km, np.diag(J)]).astype(np.float32)
 
 
 def to_model_episode(arrays: Mapping[str, np.ndarray], meta: EpisodeMetadata,
@@ -108,13 +158,39 @@ def to_model_episode(arrays: Mapping[str, np.ndarray], meta: EpisodeMetadata,
     if act.shape[0] != m:
         raise ValueError(f"{meta.episode_id}: {act.shape[0]} actions for {m} model steps")
     aux = {p: dec[p] for p in AUX_FIELDS if p in dec}
-    return ModelEpisode(episode_id=meta.episode_id, meta=meta, t=t, states=states,
-                        obs=obs.astype(np.float32), actions=act.astype(np.float32),
-                        dt=float(t[1] - t[0]), aux=aux)
+    ep = ModelEpisode(episode_id=meta.episode_id, meta=meta, t=t, states=states,
+                      obs=obs.astype(np.float32), actions=act.astype(np.float32),
+                      dt=float(t[1] - t[0]), aux=aux, vehicle=vehicle_vector(meta))
+    k = dict(cfg.tail_trim).get(meta.status, 0)
+    return trim_tail(ep, k) if k > 0 else ep
+
+
+def trim_tail(ep: ModelEpisode, k: int) -> ModelEpisode:
+    """The episode without its last ``k`` model steps (every array is aligned to the model steps, so each loses its last k rows and the
+    states / actions relation (one more state than actions) is kept). An episode that would keep fewer than 2 steps is returned with 2."""
+    k = int(max(0, min(k, ep.actions.shape[0] - 2)))
+    if k == 0:
+        return ep
+    cut = lambda a: a[:-k] if a.shape[0] > k else a  # noqa: E731
+    return ModelEpisode(episode_id=ep.episode_id, meta=ep.meta, t=cut(ep.t), states=cut(ep.states), obs=cut(ep.obs), actions=cut(ep.actions),
+                        dt=ep.dt, aux={n: cut(a) for n, a in ep.aux.items()}, vehicle=ep.vehicle)
+
+
+def imu_transport_status(episodes: Sequence) -> str:
+    """"corrected" | "raw" | "mixed" | "unknown": was the Isaac IMU transport artefact (−ω×v) removed at generation?
+    Datasets from v0.6.0 on are corrected; the Run 5 pilot v0.5.0 holds the raw sensor (manifest rows have no flag)."""
+    flags = {bool((e.meta.sim or {}).get("imu_transport_correction", False)) for e in episodes if getattr(e, "meta", None) is not None}
+    if not flags:
+        return "unknown"
+    return "corrected" if flags == {True} else ("raw" if flags == {False} else "mixed")
+
+
+IMU_RAW_WARNING = ("this dataset holds the RAW Isaac IMU (accelerometer = specific force − ω×v): the synthetic IMU φ of the latent models "
+                   "produces the true specific force and will not match it. Use a dataset generated with physics.imu_transport_correction=true (v0.6.0+).")
 
 
 def _eligible(meta: EpisodeMetadata, cfg: BuilderConfig, roles: Sequence[str] | None) -> bool:
-    if meta.status not in cfg.statuses:
+    if meta.status not in cfg.statuses and not (meta.status in cfg.extra_statuses and meta.split_role in cfg.extra_status_roles):
         return False
     if roles is not None and meta.split_role not in roles:
         return False
@@ -155,8 +231,3 @@ def model_layout() -> dict[str, Any]:
     return {"state": list(MODEL_STATE_LAYOUT),
             "obs": ["imu_accel_B[0:3]", "imu_gyro_B[3:6]"],
             "action_keys": sorted(ACTION_KEYS)}
-
-
-def iter_eligible(metas: Iterable[EpisodeMetadata], cfg: BuilderConfig,
-                  roles: Sequence[str] | None = None) -> list[EpisodeMetadata]:
-    return [m for m in metas if _eligible(m, cfg, roles)]

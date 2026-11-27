@@ -13,7 +13,6 @@ OmniDrones
 IsaacLab
 scripts/outputs
 .env
-lagacy
 # Secrets / local environment
 .env
 .env.*
@@ -28,3 +27,8 @@ credentials*.json
 /outputs/
 .pytest_cache/
 .hydra/
+
+# Launcher logs
+/logs/
+.idea/
+.idea

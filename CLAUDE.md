@@ -2,7 +2,7 @@
 
 ## What this is
 M.Tech thesis code: a **physics-prior latent world model** for long-horizon quadrotor prediction under **out-of-distribution (OOD) wind**, ds/dt = f_phys(s,u) + d_θ(h,s,u).
-This repo currently contains the **data-generation pipeline** (Isaac Sim 4.1 + OmniDrones, Hummingbird quadrotor). World-model code (`models/ training/ losses/ baselines/ evaluation/`) is out of scope until after Run 6; `training/train.py` is known-broken (imports a deleted module).
+This repo currently contains the **data-generation pipeline** (Isaac Sim 4.1 + OmniDrones, Hummingbird quadrotor). World-model code exists and is tested (`models/` B0–B6, `training/`, `losses/`, `evaluation/`, `data/dataset.py`); the old `training/train.py` was replaced by `training/run.py`. Baseline training needs the user's approval each time. Current position and pending decisions: `HANDOFF.md`; problems met: `docs/problems_log.md`.
 
 Work follows the six-run sequence in `docs/prompt.md`: (1) audit, (2) plan, (3) config/experiment architecture, (4) physical models + validation, (5) pilot dataset + quality inspection, (6) scale-up with parallel generation. See `HANDOFF.md` for the current position. Audit/plan/reports: `docs/audit/run{1..4}_*.md`.
 
@@ -25,19 +25,26 @@ Plan → simulate → write → validate. A manifest row fully determines an epi
 More detail: `docs/guides/architecture.md`, `docs/models/*.md`, `docs/guides/assumptions_limitations.md`.
 
 ## Install / run / test
-Isaac Sim 4.1 and OmniDrones are **not pip-installable**; everything runs inside the docker container `isaac-sim` (Isaac at `/isaac-sim`, repo mounted at `/workspace/PhysiWorldUAV`, 4× RTX A6000 on the host). `OmniDrones/`, `IsaacLab/`, `omnidrones_env/`, `lagacy/` are git-ignored and live only on the host/container.
+Isaac Sim 4.1 and OmniDrones are **not pip-installable**; everything runs inside the docker container `isaac-sim` (Isaac at `/isaac-sim`, repo mounted at `/workspace/PhysiWorldUAV`, 4× RTX A6000 on the host). `OmniDrones/`, `IsaacLab/`, `omnidrones_env/` are git-ignored and live only on the host/container.
 
 ```bash
 docker exec isaac-sim bash -c 'cd /workspace/PhysiWorldUAV && source omnidrones_env/bin/activate && export PYTHONPATH=$PWD/src:$PYTHONPATH && <command>'
 ```
 Commands (`<command>`):
 ```bash
-python -m pytest tests/cpu -q                       # CPU suite (~100 s), 132 tests
+python -m pytest tests/cpu -q                       # CPU suite (~5 min with OMP_NUM_THREADS=4 on the shared host), 250 tests
 python -m pytest tests/isaac --isaac -q             # Isaac validation (~2+ min, needs GPU), 17 tests
 python -m physiworld_uav.experiments.generate plan     experiment=pilot
 python -m physiworld_uav.experiments.generate run      experiment=smoke
 python -m physiworld_uav.experiments.generate validate   --dataset data/datasets/<name>
+scripts/generate_parallel.sh --workers 8 --gpus 0,1,2 -- experiment=pilot       # parallel: workers (--shard I/N) + merge; CPU-bound, so >1 worker per GPU
 python -m physiworld_uav.experiments.generate regenerate --dataset data/datasets/<name> --episode <id>
+python -m physiworld_uav.data.statistical_validator --dataset data/datasets/<name>      # quality report + figures
+python -m physiworld_uav.training.run --dataset data/datasets/<name> --name <run> --model b2|b3|b4|b4_rw|b5a|b5b|b6b_future|b6b_current [--config config/training/default.yaml config/training/compare.yaml]   # train a baseline
+scripts/train_all_baselines.sh <dataset> <tag> 0,1,2 ; scripts/eval_baselines.sh <dataset> <tag>     # all baselines on several GPUs, then evaluation (ask the user first)
+python -m physiworld_uav.evaluation.run --dataset data/datasets/<name> --models b0 b1 b2=<ckpt>      # per-role evaluation
+python -m physiworld_uav.evaluation.analysis regime|anchor|residual|shuffle --dataset ... --models b3=<ckpt> b6a_future   # wind/no-wind gap, re-observation, residual diagnostics, shuffled-u
+scripts/run_baseline_gates.sh                       # pilot gates G1/G2 (in the container)
 ```
 Without the container, only pure-Python parts (config, planning, wind, force equations) are testable, and only if `omni_drones`/`torch` import.
 
@@ -58,7 +65,7 @@ Without the container, only pure-Python parts (config, planning, wind, force equ
 * Force configs must be `validated: true` or the runner refuses them (`--allow-unvalidated-forces` is dev-only and such datasets never validate). Episodes outside any force-model envelope are excluded from model-ready data.
 * Approved aero truth (`config/forces/truth_default.yaml`): rotor drag d = 0.30 s⁻¹ (linear in Ω, in-plane), body drag with **per-axis C_D = (1.1, 1.1, 1.3)** and projected areas (0.0070, 0.0076, 0.0180) m², R = 0.10 m, ρ = 1.225; rotor-drag envelope μ ≤ **0.20** (widened from 0.15; fidelity reduced 0.15–0.20); OOD wind (4, 8] m/s.
 * Dryden frozen-turbulence speed = episode mean wind (not vehicle airspeed) so counterfactual pairs share realisations.
-* Legacy code is in `lagacy/` (sic, ignored); superseded force models in `lagacy/src_superseded/`.
+* The superseded first-generation code (old generators, force models, tests) was removed on 2026-11-26; an archive is in `/data2/chethan/mtech/archive/lagacy_2026-11-26.tar.gz` (outside the repo, nothing imports it).
 
 ## How the user wants to work
 * Do **not** silently resolve scientific ambiguities — present options with a recommendation and ask (esp. physical correctness, dataset validity, coefficients).

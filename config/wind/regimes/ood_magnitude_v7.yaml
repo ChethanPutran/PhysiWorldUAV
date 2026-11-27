@@ -1,0 +1,16 @@
+# Pilot v7 OOD wind magnitude (2026-11-25): episode mean speed above 6.2 m/s (the ID peak limit) and realised peak |w| <= 9 m/s, so the OOD wind
+# lies in (6.2, 9]. A peak limit of 9 (not 11) keeps wind plus vehicle speed inside the force-model airspeed limit of 12 m/s. The mean is drawn
+# from [6.3, 8.1] (fluctuations of up to about 1 m/s must fit under the peak limit); 3 stratified bands.
+name: ood_magnitude_v7
+category: ood_magnitude
+mean_speed: [6.3, 8.1]
+speed_strata: 3
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: steady, weight: 0.3}
+  - {type: cosine_gust, weight: 0.15, params: {peak_mps: [0.3, 1.0], rise_time_s: [0.5, 1.5], onset_fraction: [0.15, 0.7]}}
+  - {type: step, weight: 0.15, params: {delta_mps: [-1.0, 1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.7]}}
+  - {type: sinusoid, weight: 0.15, params: {amplitude_mps: [0.2, 0.8], frequency_hz: [0.05, 0.3]}}
+  - {type: ou, weight: 0.25, params: {sigma_mps: [0.1, 0.4], tau_s: [2.0, 5.0]}}
+limits: {peak_speed_max: 9.0, vertical_max: 1.0, mean_horizontal: [6.2001, 9.0]}

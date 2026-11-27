@@ -1,0 +1,22 @@
+# Physical domain randomisation (as `randomized`) plus the air density (candidate, 2026-11-24).
+# air_density_scale multiplies ρ in the body drag and the rotor-drag coefficient (∝ ρ): ±10 % covers roughly -10 °C … +35 °C at sea
+# level (ρ ≈ 1.34 … 1.15 kg/m³); the OOD shell 10-20 % reaches high-altitude / hot-day air (≈ 1.0 kg/m³). Rotor thrust varies with ρ too
+# but is already covered by `force_scale`. The factor is NOT a dimension of the space-filling design: it is drawn from its own generator
+# after the design, so every other factor of every domain equals the one of the same config without it.
+region: id
+sampler: sobol
+min_thrust_to_weight: 2.0
+parameters:
+  mass:                {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+  inertia_shape_x:     {id_halfwidth: 0.05}
+  inertia_shape_y:     {id_halfwidth: 0.05}
+  inertia_shape_z:     {id_halfwidth: 0.05}
+  force_scale:         {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+  km_kf_ratio:         {id_halfwidth: 0.05}
+  motor_time_constant: {id_halfwidth: 0.20, ood_shell: [0.20, 0.40]}
+  rotor_drag_scale:    {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+  body_drag_scale:     {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+extra_factors:
+  air_density_scale:   {id_halfwidth: 0.10, ood_shell: [0.10, 0.20]}
+holdout_corners:
+  - {mass: 0.5, force_scale: -0.5}

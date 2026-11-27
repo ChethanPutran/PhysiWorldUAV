@@ -1,0 +1,11 @@
+## Gaps in the document
+
+1. **The decoder is in the loop, which may bypass the physics.** You write `ŝ_t = D(h_t)` and integrate from `ŝ_t`. Then `h_{t+1}` is built from `φ(s̃_{t+1})`, and `ŝ_{t+1}` is decoded again from `h_{t+1}`. In an imagination rollout, the decoder can overwrite the physics-propagated state at every step, and decoder error compounds. Define the rollout so the physics state carries forward (`ŝ_{t+1} := s̃_{t+1}`). Use the decoder only to initialize or correct the state when observations arrive, like a filter update.
+
+2. **Position and velocity are not observable from IMU alone.** Accelerometer and gyro readings drift when integrated, so a decoder that infers `p` and `v` from IMU history has no way to bound the error. Be explicit about where `s_0` comes from at the start of imagination: the simulator, an EKF, or the decoder. If the decoder supplies it, expect drift in `p`.
+
+3. **No stochasticity.** Wind gusts are stochastic, and a deterministic model with an MSE loss predicts the mean. That may be fine for your metrics. It is worth stating as a limitation, and a Gaussian NLL head or small ensemble is the natural extension.
+
+4. **The residual can absorb everything.** If `d_θ` is expressive enough, it can learn the full dynamics and make `f_phys` irrelevant. B5 tests this, but a minimal-norm penalty on `d_θ` (as in APHYNITY) is a better-motivated regularizer than the smoothness term. It encourages physics to explain as much as possible. I would add it as an ablation next to `L_smooth`.
+
+5. **Loss scaling.** Position, velocity, attitude and angular velocity have different units and magnitudes, so the λ weights will be fragile. Normalize each term by its typical scale (Dreamer V3's symlog addresses the same problem).

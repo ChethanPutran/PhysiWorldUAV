@@ -152,3 +152,133 @@ def test_nested_group_subsets():
     sub = nested_group_subsets(groups, [0.1, 0.25, 0.5, 1.0], seed=0)
     assert sub[0.1] <= sub[0.25] <= sub[0.5] <= sub[1.0] == set(groups)
     assert len(sub[0.25]) == 10
+
+
+# -- integrity: per-episode checksums ----------------------------------------------------------
+def test_checksum_written_verified_and_detects_corruption(tmp_path):
+    import h5py
+    from physiworld_uav.data.writer import add_missing_checksums, episode_checksum, verify_shard
+    p = tmp_path / "s.h5"
+    a0, a1 = synthetic_episode(seed=0), synthetic_episode(seed=1)
+    with ShardWriter(p) as w:
+        w.write(a0, meta("ep0")); w.write(a1, meta("ep1"))
+    assert verify_shard(p) == {"ep0": "ok", "ep1": "ok"}
+    with h5py.File(p, "r") as f:
+        stored = f["episodes/ep0"].attrs["checksum"]
+    back, _ = read_episode(p, "ep0")
+    assert stored == episode_checksum(back) and stored.startswith("sha256:")
+    assert episode_checksum(back) != episode_checksum(read_episode(p, "ep1")[0])        # different data, different hash
+    with h5py.File(p, "a") as f:                                                         # flip one value: silent corruption
+        d = f["episodes/ep1/ground_truth/position_W"]
+        x = d[()]; x[7, 1] += 1e-3; d[...] = x
+    assert verify_shard(p) == {"ep0": "ok", "ep1": "mismatch"}
+
+
+def test_legacy_episodes_without_checksum_are_reported_and_can_be_repaired(tmp_path):
+    import h5py
+    from physiworld_uav.data.writer import add_missing_checksums, verify_shard
+    p = tmp_path / "s.h5"
+    with ShardWriter(p) as w:
+        w.write(synthetic_episode(), meta("ep0"))
+    with h5py.File(p, "a") as f:
+        del f["episodes/ep0"].attrs["checksum"]
+    assert verify_shard(p) == {"ep0": "missing"}
+    assert add_missing_checksums(p) == 1 and verify_shard(p) == {"ep0": "ok"} and add_missing_checksums(p) == 0
+
+
+def test_resume_scan_removes_corrupted_episodes_and_validation_reports_them(tmp_path):
+    import h5py
+    from physiworld_uav.experiments import generate as G
+    p = tmp_path / "shard_000.h5"
+    with ShardWriter(p) as w:
+        w.write(synthetic_episode(seed=0), meta("ep0")); w.write(synthetic_episode(seed=1), meta("ep1"))
+    with h5py.File(p, "a") as f:
+        d = f["episodes/ep1/ground_truth/velocity_W"]
+        x = d[()]; x[3, 0] += 1.0; d[...] = x
+    report = G.validate_dataset_dir(tmp_path)
+    assert not report.ok and any("ep1" in h and "mismatch" in h for h in report.hard)
+    rows, where = G._scan_shards(tmp_path, {})                       # what --resume / merge does
+    assert [r["episode_id"] for r in rows] == ["ep0"] and "ep1" not in where       # ep1 will be generated again
+    assert G.verify_shard(p) == {"ep0": "ok"}
+
+
+# -- loader benchmark ---------------------------------------------------------------------------
+def test_loader_benchmark_reports_rates_and_headroom(tmp_path):
+    import json
+    from physiworld_uav.data.loader_benchmark import benchmark, training_rate
+    from test_models import synthetic_episode as sim_episode
+    eps = [sim_episode(f"e{i}", i) for i in range(3)]
+    run = tmp_path / "run"; run.mkdir()
+    (run / "metrics.jsonl").write_text("\n".join(json.dumps({"epoch": i, "windows_per_s": r}) for i, r in enumerate((900.0, 1100.0, 1000.0))))
+    assert training_rate(run) == 1000.0 and training_rate(None) is None and training_rate(tmp_path / "none") is None
+    r = benchmark(tmp_path, episodes=eps, workers=(0, 2), batch_size=32, n_batches=5, noise="nominal", run_dir=run, horizon=10)
+    assert r["n_episodes"] == 3 and r["n_windows"] > 100 and [x["num_workers"] for x in r["loader"]] == [0, 2]
+    assert all(x["windows_per_s"] > 0 and x["windows"] > 0 for x in r["loader"])
+    assert r["headroom_best_loader_over_training"] == pytest.approx(max(x["windows_per_s"] for x in r["loader"]) / 1000.0)
+
+
+def test_imu_transport_status_and_warning_text():
+    from types import SimpleNamespace as NS
+    from physiworld_uav.data.dataset_builder import IMU_RAW_WARNING, imu_transport_status
+    mk = lambda flag: NS(meta=NS(sim={} if flag is None else {"imu_transport_correction": flag}))  # noqa: E731
+    assert imu_transport_status([]) == "unknown"
+    assert imu_transport_status([mk(True), mk(True)]) == "corrected"
+    assert imu_transport_status([mk(None), mk(False)]) == "raw"                  # old manifests have no flag: raw
+    assert imu_transport_status([mk(True), mk(False)]) == "mixed"
+    assert "RAW" in IMU_RAW_WARNING and "v0.6.0" in IMU_RAW_WARNING
+
+
+# ------------------------------------------------------------------ model rate read from the dataset (20 Hz support)
+def test_dataset_sim_reads_decimation_and_model_dt_from_the_manifest(tmp_path):
+    import json
+    from physiworld_uav.data.dataset_builder import dataset_decimation, dataset_sim
+    assert dataset_sim(tmp_path) == {"control_decimation": 4, "model_dt": 0.02}          # no manifest: the 50 Hz defaults
+    (tmp_path / "manifest.jsonl").write_text(json.dumps({"sim": {"control_decimation": 10, "model_dt": 0.05, "physics_dt": 0.005}}) + "\n")
+    assert dataset_sim(tmp_path) == {"control_decimation": 10, "model_dt": 0.05} and dataset_decimation(tmp_path) == 10
+    (tmp_path / "manifest.jsonl").write_text("{}\n")
+    assert dataset_decimation(tmp_path) == 4                                               # incomplete row: defaults
+
+
+def test_evaluation_refuses_a_model_trained_at_another_rate(tmp_path):
+    import json
+    import pytest
+    import torch
+    from physiworld_uav.evaluation.run import load_model
+    from physiworld_uav.models.world_model import ModelConfig, build_model, fit_stats
+    from physiworld_uav.training import checkpoint as ck
+    (tmp_path / "manifest.jsonl").write_text(json.dumps({"sim": {"control_decimation": 10, "model_dt": 0.05}}) + "\n")
+    name, m, _ = load_model("b1", tmp_path, torch.device("cpu"))
+    assert abs(m.dt - 0.05) < 1e-12                                                        # B1 integrates at the dataset's model step
+    from test_models import synthetic_episode as sim_episode
+    eps = [sim_episode("a", 1)]
+    mod = build_model("b2", stats=fit_stats(eps), cfg=ModelConfig(latent=8, embed=4, hidden=8), dt=0.02)
+    ck.save_atomic({"model": mod.state_dict(), "kind": "b2", "stats": {k: getattr(mod, k).tolist() for k in ("imu_mu", "imu_sd", "act_mu", "act_sd", "v_mu", "v_sd", "w_mu", "w_sd", "p_sd", "dp_sd", "dv_sd", "dth_sd", "dw_sd")},
+                     "model_cfg": {"latent": 8, "embed": 4, "hidden": 8}, "dt": 0.02}, tmp_path / "m.pt")
+    with pytest.raises(SystemExit):
+        load_model(f"b2={tmp_path / 'm.pt'}", tmp_path, torch.device("cpu"))
+
+
+# ------------------------------------------------------------------ early-ended episodes in the training role only
+def test_extra_statuses_are_eligible_in_the_training_role_only():
+    from physiworld_uav.data.dataset_builder import BuilderConfig, _eligible
+    cfg = BuilderConfig(decimation=D, extra_statuses=("terminated_ground", "terminated_envelope"))
+    assert _eligible(meta(status="completed"), cfg, None)
+    assert _eligible(meta(role="train", status="terminated_ground"), cfg, None)
+    assert _eligible(meta(role="train", status="terminated_envelope"), cfg, ["train"])
+    assert not _eligible(meta(role="val_id", status="terminated_ground"), cfg, ["val_id"])      # validation keeps completed episodes only
+    assert not _eligible(meta(role="test_id", status="terminated_envelope"), cfg, None)
+    assert not _eligible(meta(role="train", status="terminated_ground"), BuilderConfig(decimation=D), None)   # default: unchanged behaviour
+    assert not _eligible(meta(role="train", status="failed_sim"), cfg, None)
+
+
+def test_tail_trim_drops_the_last_steps_of_every_aligned_array():
+    from physiworld_uav.data.dataset_builder import BuilderConfig, to_model_episode, trim_tail
+    a = synthetic_episode()
+    full = to_model_episode(a, meta(status="terminated_ground"), BuilderConfig(decimation=D))
+    cut = to_model_episode(a, meta(status="terminated_ground"), BuilderConfig(decimation=D, tail_trim=(("terminated_ground", 3),)))
+    assert cut.n_steps == full.n_steps - 3 and cut.states.shape[0] == cut.actions.shape[0] + 1 and cut.obs.shape[0] == full.obs.shape[0] - 3
+    assert np.array_equal(cut.states, full.states[:-3]) and np.array_equal(cut.actions, full.actions[:-3])
+    assert all(v.shape[0] == full.aux[k].shape[0] - 3 for k, v in cut.aux.items())
+    other = to_model_episode(a, meta(status="completed"), BuilderConfig(decimation=D, tail_trim=(("terminated_ground", 3),)))
+    assert other.n_steps == full.n_steps                                                       # other statuses are not trimmed
+    assert trim_tail(full, 10 ** 6).n_steps == 2 and trim_tail(full, 0) is full

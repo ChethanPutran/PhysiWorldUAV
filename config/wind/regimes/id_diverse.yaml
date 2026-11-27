@@ -1,0 +1,33 @@
+# In-distribution wind, richer temporal structure (candidate, 2026-11-24): the `id` profiles plus stationary Dryden turbulence and composite
+# profiles (a wind level that steps up and back down = a regime "switch", with an OU or Dryden overlay). Same limits as `id`: realised peak
+# |w| <= 4 m/s, |w_z| <= 1 m/s; every realisation is checked against them (rejection sampling).
+# Not supported (needs WindManager support for time windows): switching the profile TYPE inside an episode, e.g. calm -> turbulence -> calm.
+name: id_diverse
+category: id
+mean_speed: [0.0, 3.0]
+azimuth_deg: [0.0, 360.0]
+elevation_deg: [-5.0, 5.0]
+profiles:
+  - {type: steady, weight: 0.15}
+  - {type: cosine_gust, weight: 0.10, params: {peak_mps: [0.3, 1.0], rise_time_s: [0.5, 1.5], onset_fraction: [0.15, 0.7]}}
+  - {type: step, weight: 0.10, params: {delta_mps: [-1.0, 1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.7]}}
+  - {type: sinusoid, weight: 0.10, params: {amplitude_mps: [0.2, 0.8], frequency_hz: [0.05, 0.3]}}
+  - {type: ou, weight: 0.10, params: {sigma_mps: [0.1, 0.4], tau_s: [2.0, 5.0]}}
+  - {type: random_gusts, weight: 0.05, params: {rate_hz: [0.05, 0.15], peak_range_mps: [0.3, 0.8], rise_range_s: [0.5, 1.2]}}
+  - type: dryden                                   # stationary turbulence, intensities (σ, σ, σ/2) and length scales (L, L, L_w)
+    weight: 0.15
+    params: {sigma_uv_mps: [0.2, 0.6], sigma_w_ratio: 0.5, length_scale_uv_m: [10.0, 30.0], length_scale_w_m: [2.0, 5.0]}
+  - type: composite                                # wind level up then down (a switch), with an OU overlay
+    weight: 0.15
+    params:
+      components:
+        - {type: step, params: {delta_mps: [1.0, 2.5], rise_time_s: [0.5, 2.0], onset_fraction: [0.2, 0.4]}}
+        - {type: step, params: {delta_mps: [-2.5, -1.0], rise_time_s: [0.5, 2.0], onset_fraction: [0.6, 0.8]}}
+        - {type: ou, params: {sigma_mps: [0.1, 0.3], tau_s: [2.0, 5.0]}}
+  - type: composite                                # a front: a level change with Dryden turbulence on top
+    weight: 0.10
+    params:
+      components:
+        - {type: step, params: {delta_mps: [0.5, 1.5], rise_time_s: [0.5, 2.0], onset_fraction: [0.3, 0.6]}}
+        - {type: dryden, params: {sigma_uv_mps: [0.15, 0.4], sigma_w_ratio: 0.5, length_scale_uv_m: [10.0, 30.0], length_scale_w_m: [2.0, 5.0]}}
+limits: {peak_speed_max: 4.0, vertical_max: 1.0, mean_horizontal: [0.0, 4.0]}

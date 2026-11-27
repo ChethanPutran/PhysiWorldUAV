@@ -1,0 +1,8 @@
+# Example: a larger B3 (every size is a key; see config/training/default.yaml for all of them).
+kind: b3
+latent: 192
+embed: 96
+enc_hidden: [192]
+dec_hidden: [384]
+resid_hidden: 384
+resid_depth: 3

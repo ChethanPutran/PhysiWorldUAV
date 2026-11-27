@@ -15,7 +15,7 @@ envelopes are documented in ``docs/models/aerodynamics.md``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor
@@ -132,9 +132,3 @@ def aero_torque(p: AeroTorqueParams, w_B: Tensor) -> tuple[Tensor, Tensor]:
     K1 = torch.tensor(p.k1, device=w_B.device)
     tau = -K1 * w_B - p.k2 * torch.linalg.norm(w_B, dim=-1, keepdim=True) * w_B
     return torch.zeros_like(w_B), tau
-
-
-@dataclass
-class ModelOutputs:
-    force_B: dict[str, Tensor] = field(default_factory=dict)
-    torque_B: dict[str, Tensor] = field(default_factory=dict)

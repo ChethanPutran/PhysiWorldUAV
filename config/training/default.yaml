@@ -1,0 +1,54 @@
+# Training configuration (TrainConfig defaults). Override with a second YAML (later wins) or --set key=value.
+kind: b2
+lr: 0.001
+weight_decay: 0.0001
+batch_size: 256
+epochs: 100
+warmup_steps: 200
+grad_clip: 1.0
+patience: 10
+stage_patience: 3
+stage_max_epochs: 0
+horizon_stages: [1, 5, 10, 20, 50]
+val_horizon: 50
+initial_state: given
+gamma: 0.99
+lambda_roll: 1.0
+lambda_dec: 1.0
+lambda_resid: 0.001
+lambda_zero: 0.0       # soft zero-residual penalty λ₀‖d_θ(h=0)‖² (0 = off; spec §3.4 option b, proposed 1e-3)
+seed: 0
+num_workers: 0
+device: auto
+tiny_episodes: 0
+
+# ---- model sizes (every size of every model; fixed by the data interface: IMU 6, action 4, state 13, output 12)
+latent: 128            # GRU state h
+embed: 64              # e_t and φ(s)
+hidden: 256            # base width: encoder hidden = hidden // 2, decoder hidden = hidden (unless enc_hidden / dec_hidden given)
+enc_hidden: null       # encoder hidden layers, e.g. [128] or [128, 128]; null = [hidden // 2]
+dec_hidden: null       # decoder hidden layers, e.g. [256]; null = [hidden]
+trans_hidden: 0        # B2 transition width; 0 = auto-match B3's parameter count
+resid_hidden: 256      # B3 / B6b residual width (also B4 (B3 width))
+b4_hidden: 0           # B4 residual width; 0 = auto-match B3's parameter count
+b5_hidden: 0           # B5 field width; 0 = auto-match B3's parameter count
+trans_depth: 2         # hidden layers of the B2 transition network
+resid_depth: 2         # hidden layers of the B3 / B6b residual network
+b4_depth: 2            # hidden layers of the B4 residual network
+field_depth: 2         # hidden layers of the B5 vector-field network
+activation: silu       # silu | relu | tanh | gelu | elu
+resid_uses_u: true     # false = residual without the action input (spec §3.4 option a; B3, B4, B6b)
+known_vehicle: false    # true = the physics prior f_phys uses each episode's true mass / k_F / k_M / inertia (B3, B4, B6; B1/B6a via evaluation name suffix _kv)
+vehicle_input: false   # true = B2 / B5 also receive the vehicle parameters (they have no physics prior)
+shared_trunk: false    # true = residual reads the decoder's trunk T(h) instead of h (spec §3.4 option c; B3, B6b)
+residual_channels: acc_only
+enc_uses_u: false
+obs_mode: instant
+history: 10
+keep_epoch_checkpoints: 3
+train_extra_statuses: []   # early-ended episodes (terminated_ground, terminated_envelope) used for TRAINING only; [] = completed episodes only
+tail_trim_ground: 5        # model steps dropped from the end of a ground-contact episode (the impact)
+fit_on: all                # all | closed_loop: episodes used for the normalisation statistics and the loss weights
+noise: nominal
+val_noise: nominal
+use_tensorboard: false

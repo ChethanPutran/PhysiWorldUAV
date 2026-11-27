@@ -68,6 +68,18 @@ def angular_velocity_body_torch(state: torch.Tensor) -> torch.Tensor:
     return quat_rotate_inverse_torch(state[..., QUAT], state[..., ANGVEL])
 
 
+def imu_transport_correction_torch(acc_B: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    """Remove Isaac's IMU transport artefact: returns ``acc_B + ω_B × v_B``.
+
+    Measured on the Run 5 pilot (280,152 samples): the Isaac ``IMUSensor`` accelerometer equals the specific force **minus**
+    ω_B × v_B (v_B = R_WBᵀ v_W), as if it differenced the velocity expressed in the body frame. A real accelerometer measures the
+    specific force. Adding ω_B × v_B (from the ground truth of the same physics step) restores it: the Δv/dt-vs-IMU residual
+    p99 fell from 1.81 to 0.057 m/s². ``state`` is the simulator layout (…, 13); ``acc_B`` shape (…, 3).
+    """
+    v_B = quat_rotate_inverse_torch(state[..., QUAT], state[..., VEL])
+    return acc_B + torch.cross(angular_velocity_body_torch(state), v_B, dim=-1)
+
+
 def quat_rotate_np(q: np.ndarray, v: np.ndarray) -> np.ndarray:
     q = np.asarray(q, dtype=np.float64)
     v = np.asarray(v, dtype=np.float64)

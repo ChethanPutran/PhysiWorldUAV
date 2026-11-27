@@ -9,6 +9,13 @@ physics_pipeline: gpu_dynamics_cpu_readback
 headless: true
 gravity: 9.81                # m/s², must equal DroneParams.G
 enhanced_determinism: true   # physxScene:enableEnhancedDeterminism (V4)
+# The Isaac IMUSensor reports specific force minus ω_B × v_B (measured on the Run 5 pilot: R² 0.83, residual p99 1.81 -> 0.057 m/s² after
+# correcting). true: the runner adds ω_B × v_B (ground truth of the same physics step) so the logged accelerometer is the specific force
+# at the base link, as a real accelerometer measures. false reproduces the raw sensor (Run 5 pilot v0.5.0 behaviour).
+imu_transport_correction: true
+# Settle steps at trim before the exact initial condition is restored (runner). 1 = the Run 5 behaviour. More steps flush simulator
+# state carried over from the previous episode (the same episode differed by <= 6e-6 m depending on what ran before it in the process).
+settle_steps: 1
 rigid_body_damping:          # D6: OmniDrones defaults are 0.2 / 0.2 (hidden drag)
   linear: 0.0
   angular: 0.0

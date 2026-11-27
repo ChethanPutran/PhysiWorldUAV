@@ -1,0 +1,3 @@
+# Model selection (keys are TrainConfig fields; sizes live in config/training/default.yaml).
+kind: b3
+enc_uses_u: true

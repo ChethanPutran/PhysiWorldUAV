@@ -1,0 +1,6 @@
+# Pipeline smoke run: 2 epochs on a short curriculum (not a result).
+epochs: 2
+horizon_stages: [5, 10]
+stage_max_epochs: 1
+val_horizon: 20
+batch_size: 256

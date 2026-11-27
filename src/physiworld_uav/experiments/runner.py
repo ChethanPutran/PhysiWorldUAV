@@ -18,20 +18,21 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol
+from typing import Callable, Any, Mapping, Protocol
 
 import numpy as np
 import torch
 
 from physiworld_uav.control.controllers import ControlLaw
 from physiworld_uav.core.state_extractor import (
-    ANGVEL, POS, QUAT, VEL, angular_velocity_body_torch, quat_rotate_torch, quat_wxyz_to_matrix,
+    ANGVEL, POS, QUAT, VEL, angular_velocity_body_torch, imu_transport_correction_torch, quat_rotate_inverse_torch, quat_rotate_torch,
+    quat_wxyz_to_matrix,
 )
 from physiworld_uav.drones.sim_binding import check_against_plan, controller_view
 from physiworld_uav.forces.system import AeroForceSystem
 from physiworld_uav.data.metadata import CounterfactualInfo, EpisodeMetadata
 from physiworld_uav.data.recorder import EpisodeRecorder
-from physiworld_uav.drones.params import DroneParams
+from physiworld_uav.drones.params import G, DroneParams
 from physiworld_uav.excitation.open_loop import OpenLoopProgram
 from physiworld_uav.excitation.reference_perturbation import reference_from_dict
 from physiworld_uav.randomization.parameter_sampler import Domain
@@ -111,7 +112,10 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
                 replay_commands: np.ndarray | None = None, enforce_guards: bool = True,
                 allow_unvalidated_forces: bool = False,
                 sim_settings: Mapping[str, Any] | None = None,
+                progress: Callable[[int, int], None] | None = None,
                 ) -> tuple[dict[str, np.ndarray], EpisodeMetadata]:
+    """``progress(step, n_steps)``, when given, is called at the start of every control interval (physics steps done, planned physics steps);
+    it must be cheap and must not raise (the generator uses it to write a progress file for the live page)."""
     if enforce_guards:
         check_guards(plan, allow_unvalidated=allow_unvalidated_forces)
     dev = sim.device
@@ -119,9 +123,21 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
     D = int(plan["sim"]["control_decimation"])
     n_steps = int(plan["n_steps"])
     n_ctrl = n_steps // D
+    replay_truncated = False
+    if plan["controller"]["mode"] == "replay":
+        # A baseline that ended early (e.g. ground contact) only provides that many commands:
+        # replay what exists and flag it, instead of failing the episode.
+        if replay_commands is None or replay_commands.shape[0] < 1:
+            raise ValueError(f"replay of {plan.get('replay_of')} has no baseline commands")
+        if replay_commands.shape[0] < n_ctrl:
+            n_ctrl = int(replay_commands.shape[0])
+            n_steps = n_ctrl * D
+            replay_truncated = True
 
     dom = plan["domain"]
     drone = Domain(domain_id=dom["domain_id"], region=dom["region"], factors=dom["factors"]).drone(nominal)
+    if hasattr(sim, "reset_to_canonical_pose"):      # the realised parameters must not depend on where the previous episode ended
+        sim.reset_to_canonical_pose()
     realised = sim.bind_domain(drone, dt)
     bad = check_against_plan(drone, realised)
     if bad:
@@ -142,9 +158,6 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
     violations = {c: 0 for c in components}
     ref = reference_from_dict(plan["reference"]) if plan.get("reference") else None
     prog = OpenLoopProgram.from_dict(plan["open_loop"]) if plan.get("open_loop") else None
-    if mode == "replay":
-        if replay_commands is None or replay_commands.shape[0] < n_ctrl:
-            raise ValueError(f"replay of {plan.get('replay_of')} needs ≥ {n_ctrl} baseline commands")
     wind = WindManager(dict(plan["wind"]["spec"]), seed=int(plan["wind"]["seed"])).configure(
         seed=int(plan["wind"]["seed"]))
 
@@ -181,12 +194,21 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
     trim_cmd = torch.as_tensor(drone.hover_command, dtype=torch.float32, device=dev).reshape(1, -1)
     reset_args = (np.asarray(ic["position"]), q0, np.asarray(ic["velocity_W"]), w_W0, trim_throttle)
     sim.reset_episode(*reset_args)
-    # one settle step at trim so the IMU holds a fresh frame, then restore the exact IC
-    sim.apply_rotor_command(trim_cmd)
-    sim.step()
+    # settle steps at trim so the IMU holds a fresh frame (and the solver's cached constraint impulses are the ones of the
+    # hover state, not of the previous episode), then restore the exact IC. ``settle_steps`` > 1 is the order-dependence fix.
+    for _ in range(max(1, int(plan["sim"].get("settle_steps", 1)))):
+        sim.apply_rotor_command(trim_cmd)
+        sim.step()
     imu0 = sim.read_imu()
     sim.reset_episode(*reset_args)
     ic_at_rest = not np.any(ic["velocity_W"]) and not np.any(ic["angular_velocity_B"])
+    if imu0 is not None and ic_at_rest:
+        # The t = 0 sample is NOT the settle-step sensor reading: that value depended on the solver state left by the previous episode in
+        # the process (4.6e-3 m/s² lateral after one settle step). It is the specific force of a vehicle at rest (a = 0) at the initial
+        # attitude, R(q0)ᵀ(0, 0, g), with zero gyro: deterministic and physically what the sensor reports at hover trim.
+        g_vec = torch.tensor([[0.0, 0.0, G]], dtype=torch.float64)
+        acc0 = quat_rotate_inverse_torch(torch.as_tensor(q0, dtype=torch.float64).reshape(1, 4), g_vec).reshape(3).numpy()
+        imu0 = (acc0, np.zeros(3), True)
 
     hold_point = torch.as_tensor(ic["position"], dtype=torch.float32, device=dev).reshape(1, 3)
     prev_q = None
@@ -199,7 +221,9 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
     last_wind = np.zeros(3)
     last_omega = torch.zeros(1, drone.num_rotors, device=dev)
 
-    def record_inst(k: int, state: torch.Tensor, imu) -> None:
+    imu_corrected = bool(plan["sim"].get("imu_transport_correction", False))
+
+    def record_inst(k: int, state: torch.Tensor, imu, clean: bool = False) -> None:
         nonlocal prev_q, last_wind, last_omega
         q = state[:, QUAT].clone()
         if prev_q is not None and float((q * prev_q).sum()) < 0:
@@ -225,17 +249,23 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
             rec.put("observations/imu_valid", k, False)
         else:
             acc, gyr, valid = imu
+            if imu_corrected and valid and not clean:    # remove the sensor's -ω×v transport term (see core/state_extractor)
+                acc = imu_transport_correction_torch(torch.as_tensor(np.asarray(acc), dtype=torch.float64, device=state.device).reshape(1, 3),
+                                                     state.to(torch.float64)).reshape(3).cpu().numpy()
             rec.put("observations/imu_accel_B", k, acc)
             rec.put("observations/imu_gyro_B", k, gyr)
             rec.put("observations/imu_valid", k, bool(valid))
 
     state = sim.get_state().reshape(1, -1).to(dev)
-    record_inst(0, state, imu0 if ic_at_rest else None)
+    record_inst(0, state, imu0 if ic_at_rest else None, clean=True)
+    state0 = state
 
     for k in range(n_steps):
         t = k * dt
         if k % D == 0:
             j = k // D
+            if progress is not None:
+                progress(k, n_steps)
             if mode == "position":
                 rp = ref.at(t)
                 out = law.position(state, [rp])
@@ -325,7 +355,16 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
                 torch.einsum("nji,nj->ni", R_WB, applied[1].to(dev)))
         sim.step()
         state = sim.get_state().reshape(1, -1).to(dev)
-        record_inst(k + 1, state, sim.read_imu())
+        imu_k1 = sim.read_imu()
+        if k == 0 and imu_k1 is not None:
+            # The sensor differences the velocity against the one it stored at the settle step, which carries solver state from the previous
+            # episode (≈ 1e-9 … 4.6e-3 m/s²). Row 1 is therefore derived from the ground truth of this episode instead: R(q₁)ᵀ((v₁ − v₀)/Δt + g ẑ).
+            dv = (state[:, VEL].to(torch.float64) - state0[:, VEL].to(torch.float64)) / dt
+            acc1 = quat_rotate_inverse_torch(state[:, QUAT].to(torch.float64), dv + torch.tensor([[0.0, 0.0, G]], dtype=torch.float64, device=dv.device))
+            imu_k1 = (acc1.reshape(3).cpu().numpy(), angular_velocity_body_torch(state).reshape(3).to(torch.float64).cpu().numpy(), True)
+            record_inst(k + 1, state, imu_k1, clean=True)
+        else:
+            record_inst(k + 1, state, imu_k1)
         reason = termination.check(state)
         if reason is not None:
             status = reason
@@ -368,7 +407,9 @@ def run_episode(sim: SimBackend, plan: Mapping[str, Any], nominal: DroneParams, 
                                        <= float(plan["forces"].get("config", {}).get("max_violation_fraction", 0.05))
                                        for c in components),
                "imu_valid_fraction": float(arrays["observations/imu_valid"].mean()),
-               "imu_k0_from_settle_step": bool(ic_at_rest)},
+               "imu_k0_from_settle_step": bool(ic_at_rest),
+               "imu_transport_corrected": imu_corrected,
+               "replay_truncated_to_baseline": replay_truncated},
         config_hash=config_hash,
         generated_utc=datetime.now(timezone.utc).isoformat(),
     )

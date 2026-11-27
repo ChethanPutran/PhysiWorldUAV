@@ -1,0 +1,12 @@
+# Baseline comparison, first pass (v0.5 vs v0.6 pilot): short curriculum, validated at 20 steps, one seed, nominal IMU noise.
+# Use after config/training/default.yaml:  --config config/training/default.yaml config/training/compare.yaml
+# Bounded: 3 curriculum stages of at most 8 epochs, then the last stage until early stopping (patience 8) or 60 epochs in total.
+epochs: 60
+horizon_stages: [1, 5, 10, 20]
+stage_patience: 3
+stage_max_epochs: 8
+patience: 8
+val_horizon: 20
+seed: 0
+noise: nominal
+val_noise: nominal
