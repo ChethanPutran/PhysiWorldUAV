@@ -79,7 +79,7 @@ def last_metrics(path: Path):
     return (json.loads(lines[-1]) if lines else None), len(lines)
 
 
-RUN_RE = re.compile(r"^(?:fx|st)_(v0\d)_(b2|b3|b4_rw|b4|b5a|b5b)(?:_(.+?))?_s(\d+)$")
+RUN_RE = re.compile(r"^(?:(?:fx|st)_(v0\d)|kv_short|kv_v07)_(b2|b3|b4_rw|b4|b5a|b5b|b6b_future|b6b_current)(?:_(.+?))?_s(\d+)$")
 
 
 def run_series(exp_root: Path, st: dict, refs=("v06_b3",)) -> list[dict]:
@@ -89,7 +89,8 @@ def run_series(exp_root: Path, st: dict, refs=("v06_b3",)) -> list[dict]:
     for name in names:
         m = RUN_RE.match(name)
         if m:
-            ds, model, var, seed = m.group(1), m.group(2), m.group(3) or "", int(m.group(4))
+            ds, model, seed = m.group(1) or "v07", m.group(2), int(m.group(4))
+            var = m.group(3) or ("kv" if m.group(1) is None else "")          # kv_short_* = known-vehicle short runs
         elif name in refs:                                   # an earlier run used as a reference: <ds>_<model>
             ds, model = name.split("_", 1); var, seed = "ref", 0
         else:

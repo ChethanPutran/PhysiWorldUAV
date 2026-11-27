@@ -110,10 +110,33 @@ class ModelEpisode:
     actions: np.ndarray
     dt: float
     aux: dict[str, np.ndarray] = field(default_factory=dict)
+    vehicle: np.ndarray | None = None       # (12,) true vehicle parameters, see vehicle_vector(); None for synthetic episodes
 
     @property
     def n_steps(self) -> int:
         return int(self.actions.shape[0])
+
+
+VEHICLE_DIM = 12
+
+
+def vehicle_vector(meta: EpisodeMetadata) -> np.ndarray | None:
+    """The vehicle parameters the simulator actually used, as the model's physics prior needs them:
+    ``[mass (1), force constants k_F (4), moment constants k_M (4), effective inertia Ixx, Iyy, Izz (3)]`` (SI units).
+    Read from the PhysX read-back (``drone_realised``): total mass, k_F, k_M and the effective composite inertia that the controllers
+    and the dynamics see (rotor links included). Aerodynamic scales and the motor time constant are NOT part of it.
+    None when the dataset has no such read-back (older datasets); models that need the vehicle then raise a clear error."""
+    r = meta.drone_realised
+    if not r or "force_constants" not in r or "moment_constants" not in r:
+        return None
+    J = np.asarray(r["composite_inertia_effective_kgm2"], dtype=np.float64)
+    off = np.abs(J - np.diag(np.diag(J))).max()
+    if off > 1e-6:
+        raise ValueError(f"{meta.episode_id}: effective inertia has off-diagonal terms ({off:.2e}); the model assumes a diagonal inertia")
+    kf, km = np.asarray(r["force_constants"], dtype=np.float64), np.asarray(r["moment_constants"], dtype=np.float64)
+    if kf.shape != (4,) or km.shape != (4,):
+        raise ValueError(f"{meta.episode_id}: expected 4 rotors")
+    return np.concatenate([[float(r["total_mass_kg"])], kf, km, np.diag(J)]).astype(np.float32)
 
 
 def to_model_episode(arrays: Mapping[str, np.ndarray], meta: EpisodeMetadata,
@@ -137,7 +160,7 @@ def to_model_episode(arrays: Mapping[str, np.ndarray], meta: EpisodeMetadata,
     aux = {p: dec[p] for p in AUX_FIELDS if p in dec}
     ep = ModelEpisode(episode_id=meta.episode_id, meta=meta, t=t, states=states,
                       obs=obs.astype(np.float32), actions=act.astype(np.float32),
-                      dt=float(t[1] - t[0]), aux=aux)
+                      dt=float(t[1] - t[0]), aux=aux, vehicle=vehicle_vector(meta))
     k = dict(cfg.tail_trim).get(meta.status, 0)
     return trim_tail(ep, k) if k > 0 else ep
 
@@ -150,7 +173,7 @@ def trim_tail(ep: ModelEpisode, k: int) -> ModelEpisode:
         return ep
     cut = lambda a: a[:-k] if a.shape[0] > k else a  # noqa: E731
     return ModelEpisode(episode_id=ep.episode_id, meta=ep.meta, t=cut(ep.t), states=cut(ep.states), obs=cut(ep.obs), actions=cut(ep.actions),
-                        dt=ep.dt, aux={n: cut(a) for n, a in ep.aux.items()})
+                        dt=ep.dt, aux={n: cut(a) for n, a in ep.aux.items()}, vehicle=ep.vehicle)
 
 
 def imu_transport_status(episodes: Sequence) -> str:

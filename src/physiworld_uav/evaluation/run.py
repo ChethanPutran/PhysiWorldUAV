@@ -43,6 +43,8 @@ def load_model(spec: str, dataset_dir: Path, device):
     dt = dataset_sim(dataset_dir)["model_dt"]                        # 0.02 s for the 50 Hz pilots, 0.05 s for a 20 Hz dataset
     if name in ("b0", "b1", "b6a_future", "b6a_current"):          # nothing to load: no learned parameters
         return name, build_model(name, dt=dt), None
+    if name in ("b1_kv", "b6a_future_kv", "b6a_current_kv"):       # same physics with the TRUE vehicle parameters of each episode
+        return name, build_model(name[:-3], dt=dt, known_vehicle=True), None
     state = ckpt.load(path, map_location=device)
     if abs(float(state["dt"]) - dt) > 1e-9:
         raise SystemExit(f"{name}: the checkpoint was trained at a model step of {state['dt']} s, the dataset has {dt} s; "
@@ -87,7 +89,7 @@ def main(argv=None) -> dict:
     p = argparse.ArgumentParser(prog="evaluate", description=__doc__.split("\n\n")[0])
     p.add_argument("--dataset", type=Path, required=True)
     p.add_argument("--config", type=Path, default=None, help="evaluation defaults (config/evaluation/default.yaml); flags override")
-    p.add_argument("--models", nargs="+", required=True, help="b0 | b1 | b6a_future | b6a_current | <kind>=<checkpoint.pt> (b2, b3, b4, b5a, b5b, b6b_*)")
+    p.add_argument("--models", nargs="+", required=True, help="b0 | b1 | b6a_future | b6a_current | b1_kv | b6a_future_kv | b6a_current_kv (true vehicle parameters) | <kind>=<checkpoint.pt> (b2, b3, b4, b5a, b5b, b6b_*)")
     p.add_argument("--roles", nargs="*", default=list(ROLE_GROUPS) + ["physics_validation"])
     p.add_argument("--horizon", type=int, default=20)
     p.add_argument("--history", type=int, default=None, help="default: read from the checkpoint(s); 10 for b0/b1 only")
@@ -111,8 +113,8 @@ def main(argv=None) -> dict:
             groups.update(physics_validation_cases(load_model_episodes(a.dataset, bcfg, roles=["physics_validation"])))
         else:
             groups[role] = load_model_episodes(a.dataset, bcfg, roles=ROLE_GROUPS.get(role, [role]))
-        if a.limit_episodes:
-            groups[role] = sorted(groups[role], key=lambda e: e.episode_id)[: a.limit_episodes]
+    if a.limit_episodes:
+        groups = {k: sorted(v, key=lambda e: e.episode_id)[: a.limit_episodes] for k, v in groups.items()}
     results: dict = {}
     all_eps = [e for v in groups.values() for e in v]
     if any(hasattr(m, "synth_imu") for _, m, _ in loaded) and imu_transport_status(all_eps) in ("raw", "mixed"):
@@ -120,7 +122,7 @@ def main(argv=None) -> dict:
     for name, model, _ in loaded:
         check_obs_mode(model, bcfg.obs_mode)
         set_phi_noise(model, a.noise)       # φ's synthetic IMU gets the same white noise as the real IMU
-        init = a.initial_state if name not in ("b0", "b1", "b6a_future", "b6a_current") else "given"
+        init = a.initial_state if name not in ("b0", "b1", "b6a_future", "b6a_current", "b1_kv", "b6a_future_kv", "b6a_current_kv") else "given"
         results[name] = {role: evaluate(model, ModelReadyDataset(eps, bcfg, transform=ImuNoise(a.noise, 777) if a.noise != "none" else None,
                                                           oracle=getattr(model, "needs_oracle", False)), horizon=a.horizon, device=device,
                                         initial_state=init, ks=[k for k in (1, 5, 10, 20, 50, 100) if k <= a.horizon])

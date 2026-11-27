@@ -45,6 +45,7 @@ def fit_stats(episodes: Sequence) -> dict[str, list[float]]:
                 dv_sd=sd(s1[:, 3:6] - s0[:, 3:6]), dth_sd=sd(dth), dw_sd=sd(s1[:, 10:13] - s0[:, 10:13]))
 
 
+VEHICLE_DIM = 12        # mass, k_F (4), k_M (4), Ixx, Iyy, Izz  (data.dataset_builder.vehicle_vector)
 ACTIVATIONS = {"silu": nn.SiLU, "relu": nn.ReLU, "tanh": nn.Tanh, "gelu": nn.GELU, "elu": nn.ELU}
 
 
@@ -102,6 +103,31 @@ def _shift(states: torch.Tensor, p_ref: torch.Tensor, sign: float) -> torch.Tens
     return out
 
 
+# ------------------------------------------------------------------ vehicle parameters (known-vehicle option)
+VEHICLE_FEATURE_SCALE = 10.0
+
+
+def vehicle_of(batch, enabled: bool, who: str):
+    """``batch["vehicle"]`` (B,12) when the model is configured to use the true vehicle parameters, else None."""
+    if not enabled:
+        return None
+    if batch is None or "vehicle" not in batch:
+        raise ValueError(f"{who}: known_vehicle / vehicle_input needs batch['vehicle']; the dataset has no PhysX read-back "
+                         f"(drone_realised with force/moment constants) or the sample was built without it")
+    return batch["vehicle"]
+
+
+def vehicle_features(veh: torch.Tensor, nominal: torch.Tensor) -> torch.Tensor:
+    """Network input from the vehicle parameters: relative deviation from the nominal vehicle, scaled to O(1)."""
+    return (veh / nominal - 1.0) * VEHICLE_FEATURE_SCALE
+
+
+def nominal_vehicle_vector() -> torch.Tensor:
+    """Reference vehicle (config/drone/hummingbird.yaml) in the layout of ``vehicle_vector``."""
+    ph = QuadrotorPhysics.from_yaml()
+    return torch.cat([torch.tensor([ph.mass]), ph.kf, ph.km, torch.diagonal(ph.J)]).float()
+
+
 # ------------------------------------------------------------------ B0
 class HoldLastState(nn.Module):
     """B0 (extra reference, not in the thesis table): zero-order hold of the last observed state."""
@@ -119,18 +145,19 @@ class PhysicsOnly(nn.Module):
     """B1: ṡ = f_phys(ŝ, u), RK4, nominal parameters, no wind. Nothing is learned. Starts from the given state."""
     name = "b1"
 
-    def __init__(self, physics: QuadrotorPhysics, dt: float = 0.02) -> None:
+    def __init__(self, physics: QuadrotorPhysics, dt: float = 0.02, known_vehicle: bool = False) -> None:
         super().__init__()
-        self.physics, self.dt = physics, float(dt)
+        self.physics, self.dt, self.known_vehicle = physics, float(dt), bool(known_vehicle)
 
     @torch.no_grad()
     def predict(self, batch, horizon: int, initial_state: str = "given", anchor: Anchor | None = None) -> torch.Tensor:
         if initial_state != "given":
             raise ValueError("B1 has no encoder/decoder: initial_state must be 'given'")
         s, outs = self.physics.project(batch["state_history"][:, -1]), []
+        veh = vehicle_of(batch, self.known_vehicle, "b1")
         for k in range(horizon):
             u = batch["future_actions"][:, k]
-            s = rk4_step(lambda x: self.physics.derivative(x, u), s, self.dt, self.physics.project)
+            s = rk4_step(lambda x: self.physics.derivative(x, u, None, veh), s, self.dt, self.physics.project)
             outs.append(s)
             if anchor is not None and anchor.state and anchor.fires(k, horizon):
                 s = batch["future_states"][:, k]
@@ -169,6 +196,8 @@ class ModelConfig:
     b5_hidden: int = 0               # B5 field width; 0 = auto-match B3's parameter count (set >0 to run a wider B5)
     residual_channels: str = "acc_only"   # "acc_only" (v̇, ω̇ only; default, choice 5) | "all" (d_θ on the whole ṡ; ablation)
     enc_uses_u: bool = False         # False: E is IMU-only (u_t is chosen after step t); True: E(IMU_t, u_t) (ablation, B2 and B3)
+    known_vehicle: bool = False      # True: f_phys uses the TRUE mass / k_F / k_M / inertia of each episode (batch["vehicle"]); B1, B3, B4, B6
+    vehicle_input: bool = False      # True: B2 / B5 additionally receive the (normalised) vehicle parameters as input of their dynamics network
     phi_noise: str = "none"          # IMU-noise preset (data/noise.py) whose WHITE part is added to the synthetic IMU of φ
 
     def __post_init__(self) -> None:
@@ -275,6 +304,15 @@ class _LatentBase(nn.Module):
     def accel_next(self, s_prev, s_next, u_next, h, ctx=None) -> torch.Tensor:                 # pragma: no cover
         raise NotImplementedError
 
+    def _veh(self, ctx):
+        """True vehicle parameters (B,12) for f_phys (known_vehicle), else None. ``ctx = (batch, k)``."""
+        return vehicle_of(ctx[0] if ctx else None, self.cfg.known_vehicle, self.name)
+
+    def _veh_in(self, ctx):
+        """Normalised vehicle features for the network input of B2 / B5 (vehicle_input), else None."""
+        v = vehicle_of(ctx[0] if ctx else None, self.cfg.vehicle_input, self.name)
+        return None if v is None else vehicle_features(v, self.veh_nom)
+
     def residual_sq(self, h, s, u, ctx=None) -> torch.Tensor | None:
         """Per-sample mean-square of the (dimensionless, masked) residual output, for the APHYNITY penalty.
 
@@ -352,7 +390,8 @@ class PureNeuralLatent(_LatentBase):
         cfg = cfg or ModelConfig()
         super().__init__(stats, cfg, dt)
         w = cfg.trans_hidden or _auto_width("b2", stats, cfg, dt)
-        self.step_net = _mlp(cfg.latent + 10 + 4, [w] * cfg.trans_depth, 12, cfg.activation)
+        self.register_buffer("veh_nom", nominal_vehicle_vector(), persistent=False)
+        self.step_net = _mlp(cfg.latent + 10 + 4 + (VEHICLE_DIM if cfg.vehicle_input else 0), [w] * cfg.trans_depth, 12, cfg.activation)
         with torch.no_grad():
             self.step_net[-1].weight.mul_(0.05); self.step_net[-1].bias.zero_()
 
@@ -361,7 +400,8 @@ class PureNeuralLatent(_LatentBase):
         return (s_next[..., 3:6] - s_prev[..., 3:6]) / self.dt
 
     def transition(self, s, u, h, ctx=None):
-        d = self.step_net(torch.cat([h, self._state_in(s), self._u(u)], -1))
+        vi = self._veh_in(ctx)
+        d = self.step_net(torch.cat([h, self._state_in(s), self._u(u)] + ([] if vi is None else [vi]), -1))
         dp, dv, dth, dw = (d[..., 0:3] * self.dp_sd, d[..., 3:6] * self.dv_sd, d[..., 6:9] * self.dth_sd, d[..., 9:12] * self.dw_sd)
         q = quat.normalize(quat.mul(quat.from_rotation_vector(dth), s[..., 6:10]))
         return torch.cat([s[..., 0:3] + dp, s[..., 3:6] + dv, q, s[..., 10:13] + dw], -1)
@@ -428,10 +468,11 @@ class PhysicsResidualLatent(_LatentBase):
     def accel_next(self, s_prev, s_next, u_next, h, ctx=None):
         """v̇ at t+1 from the model's own ṡ = f_phys + d_θ, evaluated at (s̃_{t+1}, u_{t+1}, h_t) — the stored IMU is
         instantaneous (obs_mode "instant")."""
-        return self.physics.derivative(s_next, u_next, self.residual(h, s_next, u_next))[..., 3:6]
+        return self.physics.derivative(s_next, u_next, self.residual(h, s_next, u_next), self._veh(ctx))[..., 3:6]
 
     def transition(self, s, u, h, ctx=None):
-        return rk4_step(lambda x: self.physics.derivative(x, u, self.residual(h, x, u)), s, self.dt, self.physics.project)
+        veh = self._veh(ctx)
+        return rk4_step(lambda x: self.physics.derivative(x, u, self.residual(h, x, u), veh), s, self.dt, self.physics.project)
 
 
 class PureResidualLatent(_LatentBase):
@@ -454,7 +495,8 @@ class PureResidualLatent(_LatentBase):
         self.variant = variant
         self.name = "b5" + variant
         w = cfg.b5_hidden or _auto_width("b5", stats, cfg, dt)
-        self.field = _mlp(cfg.latent + 10 + 4, [w] * cfg.field_depth, 12, cfg.activation)
+        self.register_buffer("veh_nom", nominal_vehicle_vector(), persistent=False)
+        self.field = _mlp(cfg.latent + 10 + 4 + (VEHICLE_DIM if cfg.vehicle_input else 0), [w] * cfg.field_depth, 12, cfg.activation)
         with torch.no_grad():
             self.field[-1].weight.mul_(0.05); self.field[-1].bias.zero_()
         self.register_buffer("res_scale", _residual_scale(stats, dt))
@@ -465,11 +507,11 @@ class PureResidualLatent(_LatentBase):
     def _project(s: torch.Tensor) -> torch.Tensor:
         return torch.cat([s[..., 0:6], quat.normalize(s[..., 6:10]), s[..., 10:13]], -1)
 
-    def field_out(self, h, s, u):
-        return self.field(torch.cat([h, self._state_in(s), self._u(u)], -1)) * self.res_scale * self.res_mask
+    def field_out(self, h, s, u, vi=None):
+        return self.field(torch.cat([h, self._state_in(s), self._u(u)] + ([] if vi is None else [vi]), -1)) * self.res_scale * self.res_mask
 
-    def deriv(self, h, s, u):
-        d = self.field_out(h, s, u)
+    def deriv(self, h, s, u, vi=None):
+        d = self.field_out(h, s, u, vi)
         q = quat.normalize(s[..., 6:10])
         if self.variant == "a":
             pdot, w_kin = d[..., 0:3], d[..., 6:9]
@@ -478,22 +520,24 @@ class PureResidualLatent(_LatentBase):
         return torch.cat([pdot, d[..., 3:6], quat.omega_matrix_derivative(q, w_kin), d[..., 9:12]], -1)
 
     def accel_next(self, s_prev, s_next, u_next, h, ctx=None):
-        return self.field_out(h, s_next, u_next)[..., 3:6]
+        return self.field_out(h, s_next, u_next, self._veh_in(ctx))[..., 3:6]
 
     def transition(self, s, u, h, ctx=None):
-        return rk4_step(lambda x: self.deriv(h, x, u), s, self.dt, self._project)
+        vi = self._veh_in(ctx)
+        return rk4_step(lambda x: self.deriv(h, x, u, vi), s, self.dt, self._project)
 
 
 ORACLE_FORCE_SCALE = 9.81      # F/(m g): dimensionless input of B6b (proposed fixed scales; no data statistics needed)
 ORACLE_ANGACC_SCALE = 10.0     # J⁻¹τ [rad/s²] / 10
 
 
-def _oracle_at(batch: Mapping[str, torch.Tensor], idx: int, physics: QuadrotorPhysics, timing: str):
-    """(force_W/m, J⁻¹τ_B) of the recorded total wrench for step ``idx`` ("future") or step 0 held ("current")."""
+def _oracle_at(batch: Mapping[str, torch.Tensor], idx: int, physics: QuadrotorPhysics, timing: str, veh: torch.Tensor | None = None):
+    """(force_W/m, J⁻¹τ_B) of the recorded total wrench for step ``idx`` ("future") or step 0 held ("current"); with ``veh`` the
+    true mass and inertia of the vehicle, else the nominal ones."""
     i = idx if timing == "future" else 0
-    f = batch["oracle_force_W"][:, i] / physics.mass
-    a = batch["oracle_torque_B"][:, i] @ physics.J_inv.T
-    return f, a
+    if veh is None:
+        return batch["oracle_force_W"][:, i] / physics.mass, batch["oracle_torque_B"][:, i] @ physics.J_inv.T
+    return batch["oracle_force_W"][:, i] / veh[:, 0:1], batch["oracle_torque_B"][:, i] / veh[:, 9:12]
 
 
 class PhysicsOracle(nn.Module):
@@ -503,11 +547,11 @@ class PhysicsOracle(nn.Module):
     never updates). The nominal mass and inertia are used, so parameter mismatch stays uncorrected (upper bound for the aero part only)."""
     needs_oracle = True
 
-    def __init__(self, physics: QuadrotorPhysics, timing: str = "future", dt: float = 0.02) -> None:
+    def __init__(self, physics: QuadrotorPhysics, timing: str = "future", dt: float = 0.02, known_vehicle: bool = False) -> None:
         super().__init__()
         if timing not in ("future", "current"):
             raise ValueError("timing must be 'future' or 'current'")
-        self.physics, self.timing, self.dt = physics, timing, float(dt)
+        self.physics, self.timing, self.dt, self.known_vehicle = physics, timing, float(dt), bool(known_vehicle)
         self.name = f"b6a_{timing}"
 
     @torch.no_grad()
@@ -515,12 +559,13 @@ class PhysicsOracle(nn.Module):
         if initial_state != "given":
             raise ValueError("B6 has no encoder/decoder: initial_state must be 'given'")
         s, outs = self.physics.project(batch["state_history"][:, -1]), []
+        veh = vehicle_of(batch, self.known_vehicle, self.name)
         for k in range(horizon):
             u = batch["future_actions"][:, k]
-            f, a = _oracle_at(batch, k, self.physics, self.timing)
+            f, a = _oracle_at(batch, k, self.physics, self.timing, veh)
             extra = torch.zeros(s.shape[0], 12, device=s.device, dtype=s.dtype)
             extra[:, 3:6], extra[:, 9:12] = f, a
-            s = rk4_step(lambda x: self.physics.derivative(x, u, extra), s, self.dt, self.physics.project)
+            s = rk4_step(lambda x: self.physics.derivative(x, u, extra, veh), s, self.dt, self.physics.project)
             outs.append(s)
             if anchor is not None and anchor.state and anchor.fires(k, horizon):
                 s = batch["future_states"][:, k]
@@ -546,7 +591,7 @@ class PhysicsResidualOracle(PhysicsResidualLatent):
 
     def _orc(self, ctx, offset: int) -> torch.Tensor:
         batch, k = ctx
-        f, a = _oracle_at(batch, k + offset, self.physics, self.timing)
+        f, a = _oracle_at(batch, k + offset, self.physics, self.timing, self._veh(ctx))
         return torch.cat([f / ORACLE_FORCE_SCALE, a / ORACLE_ANGACC_SCALE], -1)      # (F/m)/g and J⁻¹τ/10
 
     def residual(self, h, s, u, orc=None):
@@ -564,11 +609,11 @@ class PhysicsResidualOracle(PhysicsResidualLatent):
 
     def accel_next(self, s_prev, s_next, u_next, h, ctx=None):
         extra = self.residual(h, s_next, u_next, self._orc(ctx, 1))
-        return self.physics.derivative(s_next, u_next, extra)[..., 3:6]
+        return self.physics.derivative(s_next, u_next, extra, self._veh(ctx))[..., 3:6]
 
     def transition(self, s, u, h, ctx=None):
-        orc = self._orc(ctx, 0)
-        return rk4_step(lambda x: self.physics.derivative(x, u, self.residual(h, x, u, orc)), s, self.dt, self.physics.project)
+        orc, veh = self._orc(ctx, 0), self._veh(ctx)
+        return rk4_step(lambda x: self.physics.derivative(x, u, self.residual(h, x, u, orc), veh), s, self.dt, self.physics.project)
 
 
 class PhysicsResidualNoLatent(nn.Module):
@@ -610,10 +655,11 @@ class PhysicsResidualNoLatent(nn.Module):
         p_ref, _ = relative_frame(batch)
         s = self.physics.project(_shift(batch["state_history"][:, -1], p_ref[:, 0], -1.0))
         outs, rsq = [], []
+        veh = vehicle_of(batch, self.cfg.known_vehicle, self.name)
         for k in range(horizon):
             u = batch["future_actions"][:, k]
             rsq.append(self.residual_sq(s, u))
-            s = rk4_step(lambda x: self.physics.derivative(x, u, self.residual(x, u)), s, self.dt, self.physics.project)
+            s = rk4_step(lambda x: self.physics.derivative(x, u, self.residual(x, u), veh), s, self.dt, self.physics.project)
             outs.append(s)
             if anchor is not None and anchor.state and anchor.fires(k, horizon):
                 s = _shift(batch["future_states"][:, k], p_ref[:, 0], -1.0)
@@ -642,7 +688,7 @@ def _auto_width(kind: str, stats, cfg: ModelConfig, dt: float) -> int:
     for w in range(8, 1025, 2):
         if kind in ("b2", "b5"):
             depth = cfg.trans_depth if kind == "b2" else cfg.field_depth
-            n = base + mlp_params(cfg.latent + 14, [w] * depth, 12)
+            n = base + mlp_params(cfg.latent + 14 + (VEHICLE_DIM if cfg.vehicle_input else 0), [w] * depth, 12)
         else:   # b4
             n = mlp_params(10 + (4 if cfg.resid_uses_u else 0), [w] * cfg.b4_depth, 12)
         if abs(n - target) < best_gap:
@@ -674,18 +720,20 @@ def check_obs_mode(model: nn.Module, obs_mode: str) -> None:
 
 
 def build_model(kind: str, *, stats=None, physics: QuadrotorPhysics | None = None, dt: float = 0.02,
-                cfg: ModelConfig | None = None) -> nn.Module:
+                cfg: ModelConfig | None = None, known_vehicle: bool | None = None) -> nn.Module:
+    """``known_vehicle`` (B1 / B6a, which have no config): use the true vehicle parameters of each episode; default: ``cfg.known_vehicle``."""
     kind = kind.lower()
+    kv = bool(cfg.known_vehicle) if known_vehicle is None and cfg is not None else bool(known_vehicle)
     if kind == "b0":
         return HoldLastState()
     if kind == "b1":
-        return PhysicsOnly(physics or QuadrotorPhysics.from_yaml(), dt)
+        return PhysicsOnly(physics or QuadrotorPhysics.from_yaml(), dt, kv)
     if kind in ("b5a", "b5b"):
         if stats is None:
             raise ValueError(f"{kind} needs normalisation statistics (fit_stats on the training episodes)")
         return PureResidualLatent(stats, kind[-1], cfg, dt)
     if kind in ("b6a_future", "b6a_current"):
-        return PhysicsOracle(physics or QuadrotorPhysics.from_yaml(), kind.split("_")[1], dt)
+        return PhysicsOracle(physics or QuadrotorPhysics.from_yaml(), kind.split("_")[1], dt, kv)
     if kind in ("b6b_future", "b6b_current"):
         if stats is None:
             raise ValueError(f"{kind} needs normalisation statistics (fit_stats on the training episodes)")

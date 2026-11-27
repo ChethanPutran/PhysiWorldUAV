@@ -38,6 +38,8 @@ b4_depth: 2            # hidden layers of the B4 residual network
 field_depth: 2         # hidden layers of the B5 vector-field network
 activation: silu       # silu | relu | tanh | gelu | elu
 resid_uses_u: true     # false = residual without the action input (spec §3.4 option a; B3, B4, B6b)
+known_vehicle: false    # true = the physics prior f_phys uses each episode's true mass / k_F / k_M / inertia (B3, B4, B6; B1/B6a via evaluation name suffix _kv)
+vehicle_input: false   # true = B2 / B5 also receive the vehicle parameters (they have no physics prior)
 shared_trunk: false    # true = residual reads the decoder's trunk T(h) instead of h (spec §3.4 option c; B3, B6b)
 residual_channels: acc_only
 enc_uses_u: false

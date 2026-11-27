@@ -76,6 +76,8 @@ class TrainConfig:
     resid_uses_u: bool = True             # False = residual without the action (spec §3.4 option a)
     shared_trunk: bool = False            # True = residual reads the decoder trunk (spec §3.4 option c)
     residual_channels: str = "acc_only"   # "all" = unrestricted ablation
+    known_vehicle: bool = False           # True = f_phys uses each episode's TRUE mass, k_F, k_M, inertia (B1, B3, B4, B6); needs PhysX read-back in the data
+    vehicle_input: bool = False           # True = B2 / B5 also get the vehicle parameters as input of their dynamics network
     enc_uses_u: bool = False              # True restores u_t as an input of E (ablation, B2 and B3)
     obs_mode: str = "instant"             # φ needs "instant"
     history: int = 10
@@ -123,7 +125,7 @@ def dataset_identity(dataset_dir: Path) -> dict:
 
 def _batch(b: dict, device) -> dict:
     from physiworld_uav.data.dataset import ORACLE_KEYS
-    return {k: b[k].to(device) for k in BATCH_KEYS + tuple(k for k in ORACLE_KEYS if k in b)}
+    return {k: b[k].to(device) for k in BATCH_KEYS + tuple(k for k in ORACLE_KEYS + ("vehicle",) if k in b)}
 
 
 def make_loader(ds, cfg: TrainConfig, epoch: int) -> DataLoader:

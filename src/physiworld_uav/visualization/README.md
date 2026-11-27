@@ -14,6 +14,8 @@ python -m physiworld_uav.visualization <command> [options]      # needs PYTHONPA
 | `training` | **Live training page**: loss, validation error, epoch time per run, table with CPU/GPU/RAM, one sweep at a time | python3 |
 | `plan` | Distribution plots of a planned or generated dataset from its manifest (sizes per role, wind, vehicle factors, scenarios) | numpy, matplotlib (container) |
 | `wind` | Distribution plots of the wind stored in a dataset (per time step, per episode) | numpy, matplotlib, h5py (container) |
+| `trajectories` | Actual vs predicted trajectories per episode (top view, altitude, error vs time); wind speed (magnitude) and azimuth (direction) in the legend and a wind arrow; `summary.png` = error vs wind speed / azimuth per role | torch, checkpoints (container) |
+| `evaluation` | Figures from evaluation JSON files: error vs horizon per role, model x role heatmaps (position, attitude), OOD gap | numpy, matplotlib |
 
 Convenience launcher for the two servers, run on the **host**: `scripts/start_report_server.sh` (`generation` / `training` / `status` / `stop`).
 

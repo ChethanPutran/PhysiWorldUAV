@@ -57,3 +57,11 @@ Evidence and history: `HANDOFF.md`, `docs/problems_log.md` (B23, B24, C6–C14),
 | 5.3 | Ask IT for a DHCP reservation for your PC (MAC 10:7b:44:7a:ad:97) if its address keeps changing | user |
 | 5.4 | The server needs a restart ("System restart required"); the auto-resume (`scripts/resume_on_boot.sh`, container restart policy) is set up but has not been tested with a real reboot | user |
 | 5.5 | Isaac Sim crash note: choose GPUs with `CUDA_VISIBLE_DEVICES`, not `physics.device=cuda:N` (problems log B22) | info |
+
+
+## Added 2026-11-27: visualisations
+- [x] `visualization trajectories`: actual vs predicted trajectories, wind speed/azimuth in legend (first run on stage-1 checkpoints: outputs/reports/trajectories_v7).
+- [x] `visualization evaluation`: error-vs-horizon, model x role heatmaps, OOD gap from evaluation JSONs. Run on st_v07_c{0,1,2}.json when post_v7_stage1.sh finishes.
+- [x] B1 altitude loss explained: vehicle parameter mismatch, see problems_log C15.
+- [ ] (C15) Decide: parameter-oracle baseline (B6a/B1 with true mass, force constants) to get a real upper bound on v7; re-read B3 vs B4 results in that light.
+- [ ] (C15) Known-vehicle runs: smoke-test the trainer with `known_vehicle`/`vehicle_input` on a real dataset slice, then stage-2 retraining (needs approval). Decided (user, 2026-11-27): f_phys does NOT include drag or any aero (unknown in practice); B1_kv is therefore not exact at zero wind (0.200 m at 1 s), B6a_kv (true wrench) is the upper bound (0.006 m).

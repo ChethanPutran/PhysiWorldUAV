@@ -210,7 +210,7 @@ def test_cli_dispatch_and_help(capsys):
     import pytest
     from physiworld_uav.visualization.cli import COMMANDS, main
     main(["--help"])
-    assert "generation" in capsys.readouterr().out and set(COMMANDS) == {"generation", "report", "progress", "training", "plan", "wind"}
+    assert "generation" in capsys.readouterr().out and set(COMMANDS) == {"generation", "report", "progress", "training", "plan", "wind", "trajectories", "evaluation"}
     with pytest.raises(SystemExit):
         main(["nonsense"])
 
@@ -262,3 +262,23 @@ def test_report_server_answers_403_to_clients_outside_the_allowed_networks(tmp_p
         finally:
             srv.shutdown(); srv.server_close()
         assert code == expect, (allow, code)
+
+
+def test_evaluation_plots(tmp_path):
+    import json
+    from physiworld_uav.visualization import plot_evaluation as pe
+    def role(v):
+        return {"n_windows": 10, "n_episodes": 2, "pos_rmse_m": {"1": v / 10, "20": v}, "att_rmse_deg": {"1": 1.0, "20": 2 * v},
+                "vel_rmse_mps": {"1": 0.1, "20": v}, "reliable_horizon_mean": 5.0}
+    d = {m: {r: role(x * (1 + i)) for i, r in enumerate(["test_id", "test_ood_magnitude"])} for m, x in (("b1", 0.5), ("b3", 0.2))}
+    f = tmp_path / "e.json"; f.write_text(json.dumps(d))
+    pe.main(["--json", str(f), "--out", str(tmp_path / "o")])
+    assert (tmp_path / "o" / "heatmap_position.png").exists() and (tmp_path / "o" / "ood_gap.png").exists()
+
+
+def test_wind_of_reads_steady_spec():
+    from types import SimpleNamespace as NS
+    from physiworld_uav.visualization.plot_trajectories import wind_of
+    ep = NS(meta=NS(plan={"wind": {"spec": {"steady": {"enabled": True, "speed_mps": 5.0, "direction": [0.0, 1.0, 0.0]}}}}))
+    assert wind_of(ep) == (5.0, 90.0)
+    assert wind_of(NS(meta=NS(plan={"wind": None})))[0] == 0.0

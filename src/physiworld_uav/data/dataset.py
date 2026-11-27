@@ -76,6 +76,8 @@ class ModelReadyDataset(Dataset):
             "episode_id": ep.episode_id,
             "time_index": t,
         }
+        if ep.vehicle is not None:   # true vehicle parameters (12): used by models configured with known_vehicle / vehicle_input
+            sample["vehicle"] = torch.from_numpy(np.asarray(ep.vehicle, dtype=np.float32))
         if self.future_obs:          # evaluation only: the real IMU at t+1 … t+P (re-observation / boundary analyses)
             sample["future_obs"] = torch.from_numpy(np.asarray(ep.obs[t + 1: t + P + 1]))
         if self.oracle:

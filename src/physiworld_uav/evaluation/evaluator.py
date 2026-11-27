@@ -22,7 +22,7 @@ BATCH_KEYS = ("state_history", "obs_history", "action_history", "future_actions"
 
 def _to(batch: dict, device) -> dict:
     from physiworld_uav.data.dataset import ORACLE_KEYS
-    return {k: batch[k].to(device) for k in BATCH_KEYS + tuple(k for k in ORACLE_KEYS + ("future_obs",) if k in batch)}
+    return {k: batch[k].to(device) for k in BATCH_KEYS + tuple(k for k in ORACLE_KEYS + ("future_obs", "vehicle") if k in batch)}
 
 
 @torch.no_grad()

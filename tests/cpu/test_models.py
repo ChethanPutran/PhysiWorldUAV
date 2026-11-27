@@ -831,3 +831,100 @@ def test_train_config_mirrors_every_model_size():
     c = TrainConfig(resid_hidden=77, resid_depth=3, enc_hidden=[9], activation="relu")
     m = model_cfg_of(c)
     assert (m.resid_hidden, m.resid_depth, m.enc_hidden, m.activation) == (77, 3, [9], "relu")
+
+
+# ----------------------------------------------------------------- known vehicle (decision 2026-11-27)
+def _veh(scale_mass=1.0, scale_kf=1.0, n=3):
+    from physiworld_uav.models.world_model import nominal_vehicle_vector
+    v = nominal_vehicle_vector().clone()
+    v[0] *= scale_mass; v[1:5] *= scale_kf
+    return v.expand(n, 12).clone()
+
+
+def test_derivative_with_nominal_vehicle_equals_nominal_buffers():
+    s = torch.zeros(3, 13); s[:, 6] = 1.0; s[:, 10:13] = torch.tensor([0.3, -0.2, 0.1])
+    u = torch.full((3, 4), HOVER * 1.1)
+    assert torch.allclose(PH.derivative(s, u, None, _veh()), PH.derivative(s, u), atol=1e-5, rtol=1e-5)
+
+
+def test_derivative_uses_the_vehicle_mass_and_thrust_constant():
+    s = torch.zeros(3, 13); s[:, 6] = 1.0
+    u = torch.full((3, 4), HOVER)
+    a0 = PH.derivative(s, u)[:, 5]
+    assert a0.abs().max() < 1e-4                                            # hover
+    a_heavy = PH.derivative(s, u, None, _veh(scale_mass=1.1))[:, 5]          # 10 % heavier: thrust/m = g/1.1
+    assert torch.allclose(a_heavy, torch.full((3,), PH.g / 1.1 - PH.g), atol=1e-4)
+    a_kf = PH.derivative(s, u, None, _veh(scale_kf=1.1))[:, 5]
+    assert torch.allclose(a_kf, torch.full((3,), PH.g * 0.1), atol=1e-4)
+
+
+def test_known_vehicle_makes_physics_exact_for_that_vehicle():
+    from physiworld_uav.models.world_model import PhysicsOnly
+    ep = synthetic_episode("e", 0, n=60)
+    ds = ModelReadyDataset([ep], BCFG)
+    batch = batch_of(ds)
+    assert "vehicle" not in ds[0]                                           # synthetic episodes carry no vehicle
+    batch["vehicle"] = _veh(n=batch["state_history"].shape[0])             # nominal values: B1 stays exact
+    m = PhysicsOnly(PH, DT, known_vehicle=True)
+    err = (m.predict(batch, 10) - batch["future_states"][:, :10])[..., :3].abs().max()
+    assert err < 1e-3
+    batch["vehicle"] = _veh(scale_mass=1.1, n=batch["vehicle"].shape[0])    # a different vehicle: must move
+    assert (m.predict(batch, 10) - batch["future_states"][:, :10])[..., :3].abs().max() > 1e-2
+    del batch["vehicle"]
+    with pytest.raises(ValueError, match="vehicle"):
+        m.predict(batch, 10)
+
+
+def test_known_vehicle_models_train_forward_and_param_counts():
+    eps = [synthetic_episode(f"e{i}", i, n=60) for i in range(2)]
+    stats = fit_stats(eps)
+    batch = batch_of(ModelReadyDataset(eps, BCFG))
+    batch["vehicle"] = _veh(scale_mass=1.05, n=batch["state_history"].shape[0])
+    cfg = ModelConfig(known_vehicle=True, vehicle_input=True, latent=16, embed=8, hidden=32, resid_hidden=32, trans_hidden=32, b5_hidden=32)
+    for kind in ("b2", "b3", "b4", "b5a", "b5b"):
+        m = build_model(kind, stats=stats, dt=DT, cfg=cfg)
+        out = m(batch, 5)
+        assert torch.isfinite(out["pred"]).all(), kind
+        out["pred"].square().mean().backward()
+    # the vehicle input only widens the first layer of B2 / B5
+    plain = ModelConfig(latent=16, embed=8, hidden=32, resid_hidden=32, trans_hidden=32, b5_hidden=32)
+    from physiworld_uav.models.world_model import n_parameters
+    assert n_parameters(build_model("b2", stats=stats, dt=DT, cfg=cfg)) == n_parameters(build_model("b2", stats=stats, dt=DT, cfg=plain)) + 12 * 32
+    assert n_parameters(build_model("b3", stats=stats, dt=DT, cfg=cfg)) == n_parameters(build_model("b3", stats=stats, dt=DT, cfg=plain))
+    # B3 without a batch["vehicle"] while known_vehicle: clear error
+    b3 = build_model("b3", stats=stats, dt=DT, cfg=cfg)
+    b = {k: v for k, v in batch.items() if k != "vehicle"}
+    with pytest.raises(ValueError, match="vehicle"):
+        b3(b, 3)
+
+
+def test_vehicle_vector_from_realised():
+    from types import SimpleNamespace as NS
+    from physiworld_uav.data.dataset_builder import vehicle_vector
+    r = {"total_mass_kg": 0.7, "force_constants": [1e-5] * 4, "moment_constants": [1e-7] * 4,
+         "composite_inertia_effective_kgm2": [[0.007, 0, 0], [0, 0.008, 0], [0, 0, 0.013]]}
+    v = vehicle_vector(NS(episode_id="x", drone_realised=r))
+    assert v.shape == (12,) and np.allclose(v[[0, 1, 5, 9, 10, 11]], [0.7, 1e-5, 1e-7, 0.007, 0.008, 0.013])
+    assert vehicle_vector(NS(episode_id="x", drone_realised=None)) is None
+    r["composite_inertia_effective_kgm2"][0][1] = 1e-3
+    with pytest.raises(ValueError, match="off-diagonal"):
+        vehicle_vector(NS(episode_id="x", drone_realised=r))
+
+
+def test_b6b_known_vehicle_forward_uses_vehicle_mass():
+    eps = [synthetic_episode(f"e{i}", i, n=60) for i in range(2)]
+    stats = fit_stats(eps)
+    batch = batch_of(ModelReadyDataset(eps, BCFG))
+    n = batch["state_history"].shape[0]
+    batch["oracle_force_W"] = torch.zeros(n, 5, 3); batch["oracle_torque_B"] = torch.zeros(n, 5, 3)
+    batch["oracle_force_W"][..., 0] = 1.0                               # 1 N along x
+    cfg = ModelConfig(known_vehicle=True, latent=16, embed=8, hidden=32, resid_hidden=32)
+    m = build_model("b6b_future", stats=stats, dt=DT, cfg=cfg)
+    batch["vehicle"] = _veh(n=n)
+    out = m(batch, 5); out["pred"].square().mean().backward()
+    assert torch.isfinite(out["pred"]).all()
+    a = build_model("b6a_future", dt=DT, known_vehicle=True)
+    p1 = a.predict(batch, 5)
+    batch["vehicle"] = _veh(scale_mass=2.0, n=n)                        # twice the mass: the same force accelerates half as much in x
+    p2 = a.predict(batch, 5)
+    assert (p2 - p1)[..., 3].mean() < 0 and torch.isfinite(p2).all()

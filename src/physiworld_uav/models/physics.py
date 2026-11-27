@@ -155,7 +155,7 @@ class QuadrotorPhysics(nn.Module):
         path = Path(path) if path else Path(__file__).resolve().parents[3] / "config" / "drone" / "hummingbird.yaml"
         return cls(DroneParams.from_yaml(path), **kw)
 
-    def wrench_B(self, u: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def wrench_B(self, u: torch.Tensor, veh: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """Total thrust and body torque produced by the rotors.
 
         With T_i = kf_i Ω_i² acting along body +z at position (rx_i, ry_i):
@@ -166,20 +166,23 @@ class QuadrotorPhysics(nn.Module):
 
         Args:
             u: Rotor speeds Ω_i [rad/s], shape (..., 4).
+            veh: Optional per-sample vehicle parameters (..., 12) (see ``data.dataset_builder.vehicle_vector``); replaces k_F, k_M.
 
         Returns:
             thrust: Total thrust ΣT_i along body +z [N], shape (...,).
             torque: Body-frame torque [N·m], shape (..., 3).
         """
-        T = self.kf * u * u
+        kf, km = (self.kf, self.km) if veh is None else (veh[..., 1:5], veh[..., 5:9])
+        T = kf * u * u
         torque = torch.stack([
             (self.ry * T).sum(-1),
             -(self.rx * T).sum(-1),
-            self.yaw_torque_sign * (self.dirs * self.km * u * u).sum(-1),
+            self.yaw_torque_sign * (self.dirs * km * u * u).sum(-1),
         ], dim=-1)
         return T.sum(-1), torque
 
-    def derivative(self, s: torch.Tensor, u: torch.Tensor, extra: torch.Tensor | None = None) -> torch.Tensor:
+    def derivative(self, s: torch.Tensor, u: torch.Tensor, extra: torch.Tensor | None = None,
+                   veh: torch.Tensor | None = None) -> torch.Tensor:
         """Time derivative ṡ of the 13-dim state, optionally plus a residual.
 
         Nominal dynamics::
@@ -188,6 +191,9 @@ class QuadrotorPhysics(nn.Module):
             v̇ = R(q) (ΣT_i / m) ẑ_B - g ẑ_W
             q̇ = ½ q ⊗ [0, ω]
             ω̇ = J⁻¹ (τ - ω × Jω)
+
+        With ``veh`` (per-sample vehicle parameters, shape (..., 12): mass, k_F (4), k_M (4), diagonal inertia (3)) the mass, thrust and
+        moment constants and the inertia of THAT vehicle are used instead of the nominal buffers (arm geometry stays nominal).
 
         The quaternion is normalised internally before use, so slightly
         un-normalised inputs are tolerated.
@@ -214,13 +220,18 @@ class QuadrotorPhysics(nn.Module):
             renormalise after integrating (see :meth:`project`).
         """
         v, q, w = s[..., V], quat.normalize(s[..., Q]), s[..., W]
-        thrust, torque = self.wrench_B(u)
+        thrust, torque = self.wrench_B(u, veh)
         R = quat.to_rotation_matrix(q)
         z_b = R[..., :, 2]                                          # body z in world
-        acc = z_b * (thrust / self.mass).unsqueeze(-1)
+        mass = self.mass if veh is None else veh[..., 0]
+        acc = z_b * (thrust / mass).unsqueeze(-1)
         acc = acc - torch.tensor([0.0, 0.0, self.g], device=s.device, dtype=s.dtype)
-        Jw = w @ self.J.T
-        wdot = (torque - torch.cross(w, Jw, dim=-1)) @ self.J_inv.T
+        if veh is None:
+            Jw = w @ self.J.T
+            wdot = (torque - torch.cross(w, Jw, dim=-1)) @ self.J_inv.T
+        else:                                                       # diagonal inertia of this vehicle
+            Jd = veh[..., 9:12]
+            wdot = (torque - torch.cross(w, Jd * w, dim=-1)) / Jd
         pdot = v
         w_kin = w
         if extra is not None:

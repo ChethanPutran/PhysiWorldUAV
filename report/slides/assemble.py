@@ -1,0 +1,40 @@
+import re
+src=open("build_deck_v1.js").read()
+new=open("new_blocks.js").read()
+new=new.replace("Learned models are 5 to 10 times better than physics alone at 1 s.","Learned models are 4 to 5 times better than physics alone at 1 s in distribution.")
+new=new.replace("OOD direction is easy for every learned model; OOD magnitude is hard for all of them","OOD direction errors are lower than in distribution; OOD magnitude is hard for all models")
+new=new.replace("the error at 1 s is about 2.5 to 3 times the in-distribution value","the error at 1 s is 1.7 to 2.8 times the in-distribution value")
+new=new.replace("wind-range augmentation (done in v7 data)","wider training wind (done in the v7 data)")
+new=new.replace("{ x: 0.6, y: 5.5, w: 5.6, h: 1.2, fontSize: 13 });","{ x: 0.6, y: 5.5, w: 5.0, h: 1.3, fontSize: 13 });")
+nb={m.group(1):m.group(2) for m in re.finditer(r"//@@(\w+)\n(\{.*?\n\}\n)(?=//@@|\Z)",new,re.S)}
+i0=src.index("// ---------------------------------------------------------------- 1 Title")
+i1=src.index("(async () =>")
+header,region,tail=src[:i0],src[i0:i1],src[i1:]
+region=re.sub(r'\nsection\("[^"]*"\);','',region)
+region=re.sub(r'\n// -{10,}[^\n]*','',region)
+blocks=[b.strip("\n") for b in re.split(r'\n(?=\{\n  const s = )',region.strip("\n")) if b.strip()]
+keys={"title":"M.Tech thesis","problem":"Recursive prediction drifts","approach":"Approach: simulate","evolved":"How the project evolved","audit":"What did not work: the first","infra":"Infrastructure: one shared","sim":"Simulation platform","valid":"Physics validation","pilot":"Pilot v0.5 / v0.6: 147","problems":"Problems found while","protocol":"Training and evaluation protocol","pilotres":"Pilot results","diag":"Diagnostics: variants","v7wind":"Pilot v7: wide","v7size":"Pilot v7 dataset","gen":"Data generation cost","quality":"v7 quality report","train":"Training curves on v7","results":"Stage-1 results on v7","traj":"Open-loop rollouts","diagnosis":"Why B1 and the oracle","kv":"Known-vehicle physics prior","kvtrain":"Known-vehicle training (running)","worked":"What worked, what did not","limits":"Limitations and threats","future":"Future work","summary":"T(s, \"Summary\""}
+eb={}
+for k,sub in keys.items():
+    c=[b for b in blocks if sub in b]; assert len(c)==1,(k,len(c)); eb[k]=c[0]
+order=[("sec","Opening"),"E:title","N:outline",
+("sec","Problem and literature"),"E:problem","N:problem","N:dynamics","N:ch1","N:ch2","N:ch3","N:lit1","N:lit2","N:gap","N:rq",
+("sec","Approach and model"),"E:approach","N:state","N:arch","N:fphys","N:resid","N:imag","N:loss","N:baselines","N:baselines2","N:decisions",
+("sec","How the project evolved"),"E:evolved","E:audit",
+("sec","Infrastructure and data generation"),"E:infra","N:software","E:sim","N:drone","N:aero","N:wind","N:scen","N:schema","E:valid","E:problems","E:pilot",
+("sec","Pilot experiments"),"E:protocol","E:pilotres","E:diag","N:cv",
+("sec","Pilot v7"),"E:v7wind","E:v7size","N:v7veh","N:v7cov","E:gen","E:quality",
+("sec","Stage-1 results"),"E:train","E:results","N:heat","N:horizon","E:traj","E:diagnosis","E:kv","E:kvtrain",
+("sec","Lessons and next steps"),"E:worked","E:limits","E:future","N:status","E:summary",
+("sec","Backup"),"N:qa","N:refs"]
+out=[];n=0
+for o in order:
+    if isinstance(o,tuple): out.append('section("%s");'%o[1]); continue
+    t,k=o.split(":"); out.append(eb[k] if t=="E" else nb[k]); n+=1
+print("slides",n)
+arrow='''
+function arrow(s, x1, y1, x2, y2, color) {
+  s.addShape(pres.shapes.LINE, { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), flipH: x2 < x1, flipV: y2 < y1, line: { color: color || INK, width: 2, endArrowType: "triangle" } });
+}
+'''
+open("build_deck.js","w").write(header+arrow+"\n"+"\n".join(out)+"\n\n"+tail)
