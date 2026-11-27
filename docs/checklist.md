@@ -118,4 +118,4 @@ Reset checklist: edit the boxes above.
 - [x] **(added)** Early-ended episodes usable for training only (builder `extra_statuses` / `tail_trim`, trainer `train_extra_statuses`, `tail_trim_ground`, `fit_on`); not yet trained
 - [ ] **(added)** Look at the 835 soft validation findings of v7; train on v7 (needs approval)
 - [ ] **(added)** Decide how to handle the 20 Hz attitude-mode scenarios that leave the rotor-drag envelope (problems log B24) and whether early-ended episodes may bypass the applicability rule in training
-
+- [ ] **(added)** Remaining work is collected in `docs/TODO.md`

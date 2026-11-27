@@ -79,7 +79,7 @@ def last_metrics(path: Path):
     return (json.loads(lines[-1]) if lines else None), len(lines)
 
 
-RUN_RE = re.compile(r"^fx_(v0\d)_(b2|b3|b4_rw|b4|b5a|b5b)(?:_(.+?))?_s(\d+)$")
+RUN_RE = re.compile(r"^(?:fx|st)_(v0\d)_(b2|b3|b4_rw|b4|b5a|b5b)(?:_(.+?))?_s(\d+)$")
 
 
 def run_series(exp_root: Path, st: dict, refs=("v06_b3",)) -> list[dict]:
@@ -331,16 +331,16 @@ function renderDash(){
   const order={running:0,failed:1,done:2,queued:3},jobs=[...d.jobs].sort((a,b)=>order[a.state]-order[b.state]||(a.name<b.name?-1:1)),show=jobs.filter(j=>j.state==='running'||j.state==='failed').concat(jobs.filter(j=>j.state==='done').slice(0,4));
   $('#d-runs-note').textContent=q+' queued, '+n+' done';
   $('#d-rt').innerHTML='<tr><th>Run</th><th>GPU</th><th>State</th><th>Epoch</th><th>Horizon</th><th>Elapsed</th><th>s / epoch</th><th>Windows/s</th><th>Val RMSE</th><th>Best</th><th>CPU</th><th>RAM</th><th>GPU MB</th></tr>'+
-    show.map(j=>`<tr><td title="${esc(j.name)}">${esc(j.name.replace(/^fx_/,''))}</td><td>${j.gpu==null?'—':j.gpu}</td><td class="${j.state==='running'?'ok':j.state==='failed'?'bad':''}">${j.state}</td><td>${j.epoch||'—'}</td><td>${j.horizon||'—'}</td><td>${j.elapsed_s==null?'—':dT(j.elapsed_s)}</td><td>${dF(j.epoch_s,1)}</td><td>${dF(j.windows_per_s,0)}</td><td>${dF(j.val,4)}</td><td>${dF(j.best,4)}</td><td>${j.cpu_pct==null?'—':dF(j.cpu_pct,0)+' %'}</td><td>${j.rss_mb==null?'—':dF(j.rss_mb/1024,1)}</td><td>${j.gpu_mb==null?'—':dF(j.gpu_mb,0)}</td></tr>`).join('');
+    show.map(j=>`<tr><td title="${esc(j.name)}">${esc(j.name.replace(/^(fx|st)_/,''))}</td><td>${j.gpu==null?'—':j.gpu}</td><td class="${j.state==='running'?'ok':j.state==='failed'?'bad':''}">${j.state}</td><td>${j.epoch||'—'}</td><td>${j.horizon||'—'}</td><td>${j.elapsed_s==null?'—':dT(j.elapsed_s)}</td><td>${dF(j.epoch_s,1)}</td><td>${dF(j.windows_per_s,0)}</td><td>${dF(j.val,4)}</td><td>${dF(j.best,4)}</td><td>${j.cpu_pct==null?'—':dF(j.cpu_pct,0)+' %'}</td><td>${j.rss_mb==null?'—':dF(j.rss_mb/1024,1)}</td><td>${j.gpu_mb==null?'—':dF(j.gpu_mb,0)}</td></tr>`).join('');
   $('#d-gt').innerHTML='<tr><th>GPU</th><th>Util</th><th>Memory</th><th>Temp</th><th>Power</th><th>Our runs</th></tr>'+d.gpus.map(g=>{const rs=d.jobs.filter(j=>j.state==='running'&&j.gpu===String(g.index)||j.state==='running'&&j.gpu===g.index);return `<tr><td>${g.index}</td><td>${dF(g.util,0)} %</td><td>${dF(g.mem_used_mb/1024,1)}/${dF(g.mem_total_mb/1024,0)}</td><td>${g.temp_c==null?'—':dF(g.temp_c,0)+'°'}</td><td>${g.power_w==null?'—':dF(g.power_w,0)+' W'}</td><td>${rs.length}</td></tr>`}).join('');
   $('#d-host').innerHTML=`<div>load <b>${dF(d.host.load1,0)}</b> / ${d.host.cores} cores</div><div>our CPU <b>${dF(o.cpu_cores,0)}</b> cores</div><div>our RAM <b>${dF(o.rss_gb,1)}</b> GB</div>`;
   // charts: the running runs (all runs if none runs)
   const names=new Set(jobs.filter(j=>j.state==='running').map(j=>j.name));let series=DATA.runs.filter(r=>names.has(r.name));if(!series.length)series=DATA.runs.filter(r=>r.state==='done').slice(-6);
   const lines=lineChart($('#d-valsvg'),series,'vk',$('#d-valsvg').dataset.log!=='0');lineChart($('#d-losssvg'),series,'roll',true);
-  $('#d-leg').innerHTML=(lines||[]).map(l=>`<span><i style="background:${l.c}"></i>${esc(l.r.name.replace(/^fx_/,''))}</span>`).join('');
+  $('#d-leg').innerHTML=(lines||[]).map(l=>`<span><i style="background:${l.c}"></i>${esc(l.r.name.replace(/^(fx|st)_/,''))}</span>`).join('');
   $('#d-val-note').textContent=series.length+' run'+(series.length===1?'':'s')+', x = epoch';
   const fin=d.jobs.filter(j=>j.best!=null).sort((a,b)=>a.best-b.best).slice(0,8);
-  $('#d-bt').innerHTML='<tr><th>Run</th><th>Best val [m]</th><th>State</th></tr>'+fin.map(j=>`<tr><td title="${esc(j.name)}">${esc(j.name.replace(/^fx_/,''))}</td><td>${dF(j.best,4)}</td><td>${j.state}</td></tr>`).join('');
+  $('#d-bt').innerHTML='<tr><th>Run</th><th>Best val [m]</th><th>State</th></tr>'+fin.map(j=>`<tr><td title="${esc(j.name)}">${esc(j.name.replace(/^(fx|st)_/,''))}</td><td>${dF(j.best,4)}</td><td>${j.state}</td></tr>`).join('');
 }
 function setView(v){document.body.classList.toggle('dash',v==='dash');$('#tab-dash').classList.toggle('on',v==='dash');$('#tab-curves').classList.toggle('on',v!=='dash');if(v==='dash')renderDash();else render();try{history.replaceState(null,'',v==='dash'?'#dashboard':'#curves')}catch(e){}}
 $('#tab-dash').onclick=()=>setView('dash');$('#tab-curves').onclick=()=>setView('curves');addEventListener('resize',()=>{if(document.body.classList.contains('dash'))renderDash()});

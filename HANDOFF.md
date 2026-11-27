@@ -1,7 +1,7 @@
 # HANDOFF
 
 Saved 2026-11-24 (container clock UTC; host clock IST = UTC + 5:30) · Branch `handoff/run5-start` · **Nothing is committed**: all work of the last days is in the working tree (the user also moved or deleted several `docs/` files; do not restore them; the specs now live in `.idea/specs/`).
-Read first: `CLAUDE.md` (architecture, commands, gotchas), `docs/problems_log.md` (everything that went wrong and how it was resolved), `docs/checklist.md` and `.idea/specs/e2e_done.md` (status with evidence), `docs/guides/glossary.md` (terms: group, domain, regime, envelope...).
+**Remaining work: `docs/TODO.md`.** Read first: `CLAUDE.md` (architecture, commands, gotchas), `docs/problems_log.md` (everything that went wrong and how it was resolved), `docs/checklist.md` and `.idea/specs/e2e_done.md` (status with evidence), `docs/guides/glossary.md` (terms: group, domain, regime, envelope...).
 
 ## Sweep `fix_v1`: FINISHED and evaluated (2026-11-25)
 * 29 runs, all done (`outputs/sweeps/fix_v1/status.json`), evaluated by `scripts/post_sweep.sh`; results `docs/results/sweep_fix_v1.md`, tables/figure `outputs/reports/sweep_fix_v1/`. The first report folder `outputs/reports/training_compare_v05_v06/` has a `README_STALE.md` (old best.pt).

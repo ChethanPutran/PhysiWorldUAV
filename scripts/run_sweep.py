@@ -76,7 +76,8 @@ def main() -> int:
             if rc != 0:
                 _notice(f"A training run failed (exit code {rc})", "Training", "high", "x")
 
-    ths = [threading.Thread(target=worker, args=(g,)) for g in a.gpus.split(",") for _ in range(a.per_gpu)]
+    gpus = a.gpus.split(",")
+    ths = [threading.Thread(target=worker, args=(g,)) for _ in range(a.per_gpu) for g in gpus]      # round robin over the GPUs, so that fewer jobs than slots spread evenly
     for t in ths:
         t.start(); time.sleep(2)                         # stagger the starts (dataset loading)
     for t in ths:

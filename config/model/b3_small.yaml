@@ -1,0 +1,7 @@
+# A small B3 (60,281 parameters against 227,033 for the default): latent 64, embed 32, hidden 128, residual width 128.
+# Tests whether the model is larger than the data needs (docs/results/sweep_fix_v1.md, data-per-parameter discussion).
+kind: b3
+latent: 64
+embed: 32
+hidden: 128
+resid_hidden: 128
