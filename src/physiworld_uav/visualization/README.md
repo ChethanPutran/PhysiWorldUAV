@@ -15,6 +15,9 @@ python -m physiworld_uav.visualization <command> [options]      # needs PYTHONPA
 | `plan` | Distribution plots of a planned or generated dataset from its manifest (sizes per role, wind, vehicle factors, scenarios) | numpy, matplotlib (container) |
 | `wind` | Distribution plots of the wind stored in a dataset (per time step, per episode) | numpy, matplotlib, h5py (container) |
 | `trajectories` | Actual vs predicted trajectories per episode (top view, altitude, error vs time); wind speed (magnitude) and azimuth (direction) in the legend and a wind arrow; `summary.png` = error vs wind speed / azimuth per role | torch, checkpoints (container) |
+| `figures` | **All figures of the report and slides** (error accumulation, coverage, wind, domain randomisation, counterfactuals, IMU, dataset versions, training curves, error vs horizon, ID vs OOD, severity, error distribution, qualitative and failure cases, architecture and training/imagination diagrams, timeline). Writes pdf + png (+ jpg, svg) per figure to `outputs/figures`; `--only`, `--out`, `--formats`, `--copy-to`, `--list` | numpy, matplotlib; cached data from `figure-data` |
+| `figure-data` | Extracts what the figures need from the HDF5 shards and checkpoints (rollouts, coverage, wind series, IMU, counterfactual siblings, per-episode errors) into `outputs/figure_cache` | torch, h5py, checkpoints (container) |
+| `tables` | LaTeX tables computed from the evaluation files and datasets (main results, dataset statistics) | numpy |
 | `evaluation` | Figures from evaluation JSON files: error vs horizon per role, model x role heatmaps (position, attitude), OOD gap | numpy, matplotlib |
 
 Convenience launcher for the two servers, run on the **host**: `scripts/start_report_server.sh` (`generation` / `training` / `status` / `stop`).
@@ -78,3 +81,17 @@ Other plots live in this folder as well: `dataset_report.py` (the report), `epis
 ## Tests
 
 `tests/cpu/test_visualization.py` (assembled index, live states, resource figures, progress). Run with `python -m pytest tests/cpu/test_visualization.py -q`.
+
+
+## Report and slide figures (reusable)
+
+```
+# 1. in the container: data that needs HDF5 / checkpoints (about an hour for the per-episode errors on v7)
+python -m physiworld_uav.visualization figure-data                 # --only traj extra errors failure
+# 2. anywhere with matplotlib: draw everything (pdf + png), copy into the report folder
+python -m physiworld_uav.visualization figures --formats pdf png --copy-to report/figures_new
+python -m physiworld_uav.visualization figures --list              # names; --only error_accumulation horizon ...
+python -m physiworld_uav.visualization tables --out report/auto_tables.tex
+```
+
+Each figure is one function `fig_<name>` in `report_figures.py` (style, palette and `save()` at the top); to add a figure, write a function that draws and calls `save(fig, "<name>")`. For a new dataset version pass `--dataset data/datasets/<name>` and change the model names in `figure_data.py` (`KV_MODELS`).

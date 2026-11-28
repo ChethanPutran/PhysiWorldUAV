@@ -10,6 +10,9 @@ Commands (details and examples in README.md next to this file):
     wind         distribution plots of the wind actually stored in a dataset (needs the HDF5 shards)
     trajectories actual vs predicted trajectories per episode, wind speed and direction in the legend (needs checkpoints; container)
     evaluation   figures from evaluation JSON files: error vs horizon, model x role heatmaps, OOD gap
+    figures      all figures of the report and slides (pdf + png [+ jpg]); reusable for later reports (see report_figures.py)
+    figure-data  data for those figures that needs the HDF5 shards or checkpoints (container)
+    tables       LaTeX tables computed from the evaluation files and the datasets (main results, dataset statistics)
 
 Every command passes its remaining arguments to the module that implements it; ``<command> --help`` shows them.
 """
@@ -26,6 +29,9 @@ COMMANDS = {
     "wind": ("physiworld_uav.visualization.plot_wind_distribution", []),
     "trajectories": ("physiworld_uav.visualization.plot_trajectories", []),
     "evaluation": ("physiworld_uav.visualization.plot_evaluation", []),
+    "figures": ("physiworld_uav.visualization.report_figures", []),
+    "figure-data": ("physiworld_uav.visualization.figure_data", []),
+    "tables": ("physiworld_uav.visualization.report_tables", []),
 }
 
 
