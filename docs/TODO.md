@@ -65,3 +65,7 @@ Evidence and history: `HANDOFF.md`, `docs/problems_log.md` (B23, B24, C6–C14),
 - [x] B1 altitude loss explained: vehicle parameter mismatch, see problems_log C15.
 - [ ] (C15) Decide: parameter-oracle baseline (B6a/B1 with true mass, force constants) to get a real upper bound on v7; re-read B3 vs B4 results in that light.
 - [ ] (C15) Known-vehicle runs: smoke-test the trainer with `known_vehicle`/`vehicle_input` on a real dataset slice, then stage-2 retraining (needs approval). Decided (user, 2026-11-27): f_phys does NOT include drag or any aero (unknown in practice); B1_kv is therefore not exact at zero wind (0.200 m at 1 s), B6a_kv (true wrench) is the upper bound (0.006 m).
+
+## Update 2026-11-28
+* Known-vehicle training (9 runs) and all-role evaluation: DONE (`docs/results/v7_known_vehicle.md`, figures `outputs/reports/evaluation_v7_kv/`). Next: seeds 1 and 2 for B2, B3, B4; tests of why the residual does not extrapolate on OOD wind magnitude (longer history, non-linear probe, OOD-aware checkpoint selection, stronger weight decay); reliable-horizon curves with intervals over groups.
+* Midterm slides: `report/slides/PhysiWorldUAV_midterm.pptx` (60 slides, rebuilt with the final known-vehicle numbers).
