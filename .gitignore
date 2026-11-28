@@ -32,3 +32,5 @@ credentials*.json
 /logs/
 .idea/
 .idea
+# report and slides are kept locally, not in git
+/report/

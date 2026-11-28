@@ -392,17 +392,7 @@ section("Approach and model");
     ["B6b", "B3 with the oracle wrench as extra input", Y, Y, "residual", "Learned model given the disturbance"],
     ["CV", "Constant velocity (added in the audit)", N, N, N, "No-learning reference"]],
     0.6, 1.5, 12.1, [1.2, 4.6, 0.9, 1.1, 1.1, 3.2], { fs: 12, rh: 0.5, alignLeft: true });
-}
-
-{
-  const s = content("Fair comparison: matched data, capacity and protocol",
-    "1:30. All trained models use the same windows, loss, curriculum and optimiser. Parameter counts are matched to B3 (about 227 thousand); B4 is also shown at B3 width (73k) and B3 small (60k) to separate capacity from memory. The oracle B6 uses the nominal mass and inertia, so the parameter mismatch is not removed by it (unless the known-vehicle option is on).");
-  s.addChart(pres.charts.BAR, [{ name: "Parameters (thousands)", labels: ["B2", "B3", "B3 small", "B4", "B4 (B3 width)", "B5a / B5b"], values: [227, 227, 60, 226, 73, 227] }],
-    { x: 0.5, y: 1.4, w: 6.2, h: 4.2, barDir: "col", chartColors: [TEAL], showValue: true, dataLabelPosition: "outEnd", dataLabelFontSize: 12, dataLabelFontFace: "+mn-lt", dataLabelColor: INK, showLegend: false,
-      catAxisLabelFontSize: 11, valAxisLabelFontSize: 11, catAxisLabelFontFace: "+mn-lt", valAxisLabelFontFace: "+mn-lt", catAxisLabelColor: MUTED, valAxisLabelColor: MUTED, valGridLine: { color: "E1E7EC", size: 0.5 }, catGridLine: { style: "none" },
-      showTitle: true, title: "Trainable parameters [thousands]", titleFontSize: 13, titleColor: NAVY, titleFontFace: "+mn-lt", valAxisMinVal: 0, valAxisMaxVal: 260 });
-  bullets(s, ["Same windows, loss, curriculum, optimiser, history and targets for every trained model", "B2’s hidden width is set so its parameter count is within 10 % of B3", "B4 and B3 small test whether capacity or memory matters", "B2 receives the latent through the same coupling: memory does not separate B2 from B3, the physics prior does", "B6 removes only the aerodynamic part of the error; it keeps nominal mass and inertia"], 7.0, 1.5, 5.7, 5.2, 14);
-  card(s, 0.6, 5.75, 6.1, 1.05, "Central comparison", "B2 vs B3: identical except for the physics prior.", AMBER, 13);
+  caption(s, "Same windows, loss, curriculum and optimiser for all trained models; parameters matched to B3 (227k); B4 at B3 width 73k, B3 small 60k. B6 removes only the aerodynamic part of the error.", 0.6, 6.55, 12.1);
 }
 
 {
@@ -657,13 +647,6 @@ section("Pilot v7");
 }
 
 {
-  const s = content("Pilot v7 coverage: wind bins, vehicle bins and scenario mix",
-    "1:00. Left: episodes per mean-wind bin; calm is still the largest bin but the strata cover 0 to 8.5 m/s. Middle: ID domains per vehicle-factor bin, all populated. Right: scenario by role; closed loop dominates training, helix and figure eight appear only in the trajectory OOD role.");
-  img(s, "v7_coverage.png", 0.6, 1.5, 12.1, 4.0);
-  bullets(s, ["Mean wind is stratified and weighted to the upper band; calm episodes remain the largest bin", "Every vehicle-factor bin of the ID range holds 30–46 domains", "Helix and figure-eight trajectories appear only in test_ood_trajectory"], 0.6, 5.6, 12.1, 1.4, 14);
-}
-
-{
   const s = content("Data generation cost: 4,530 episodes in 5.8 hours on 9 workers",
     "1:00. generation_wall_s = 20,819 s (5.8 h). 9 parallel workers, CPU-bound, 6 to 16 GB each. The pilot (147 episodes) took 26 minutes on 3 workers. Auto-resume after a server restart is set up. Planned cost was about 42 worker-hours.");
   stat(s, 0.6, 1.5, 2.6, "5.8 h", "wall time, 20,819 s", TEAL);
@@ -757,16 +740,43 @@ section("Stage-1 results");
   caption(s, "Source: outputs/eval/kv_check_v7.json (60 episodes per role); problems log C15.", 0.6, 5.7, 6.6);
 }
 {
-  const s = content("Known-vehicle training (running): B6b is far better; learned models improve slightly",
-    "1:30. Best validation position RMSE at 20 steps (1 s). Nine runs launched at 07:42 on 27 Nov; four have finished (B2, B4, B4 B3 width, B5b), the others are still training at the time of writing. B6b with oracle wrench reaches 0.05 to 0.065 m. B3 is 0.175 against 0.177 in stage 1 at epoch 30 of 60. Re-update on the day.");
+  const s = content("Known-vehicle training finished: B3 is the best learned model",
+    "1:30. All nine runs finished on 27 Nov. Best validation position RMSE at 1 s. Every learned model improves slightly on stage 1. B3 reaches 0.165 m against 0.177 m, the best non-oracle result. B6b with the oracle wrench reaches 0.035 m (future) and 0.047 m (current). B2, B5a and B5b become unstable after the curriculum reaches horizon 20 but the best checkpoint is kept.");
   s.addChart(pres.charts.BAR, [
-    { name: "Stage 1 (nominal physics)", labels: ["B2", "B3", "B4 (B3 width)", "B5a", "B5b"], values: [0.218, 0.177, 0.178, 0.239, 0.222] },
-    { name: "Known vehicle (so far)", labels: ["B2", "B3", "B4 (B3 width)", "B5a", "B5b"], values: [0.213, 0.175, 0.169, 0.233, 0.214] }],
-    { x: 0.5, y: 1.4, w: 8.2, h: 5.2, barDir: "col", barGrouping: "clustered", chartColors: ["8A98A5", TEAL], showValue: true, dataLabelFormatCode: "0.000", dataLabelFontSize: 10, dataLabelPosition: "outEnd", dataLabelFontFace: "+mn-lt", dataLabelColor: INK,
+    { name: "Stage 1 (nominal physics)", labels: ["B2", "B3", "B3 small", "B4 (B3 width)", "B4", "B5a", "B5b"], values: [0.218, 0.177, 0.178, 0.178, 0.184, 0.239, 0.222] },
+    { name: "Known vehicle", labels: ["B2", "B3", "B3 small", "B4 (B3 width)", "B4", "B5a", "B5b"], values: [0.213, 0.165, 0.172, 0.169, 0.179, 0.233, 0.215] }],
+    { x: 0.5, y: 1.4, w: 8.4, h: 5.3, barDir: "col", barGrouping: "clustered", chartColors: ["8A98A5", TEAL], showValue: true, dataLabelFormatCode: "0.000", dataLabelFontSize: 9, dataLabelPosition: "outEnd", dataLabelFontFace: "+mn-lt", dataLabelColor: INK,
       showLegend: true, legendPos: "b", legendFontSize: 11, legendFontFace: "+mn-lt", catAxisLabelFontSize: 11, valAxisLabelFontSize: 11, catAxisLabelFontFace: "+mn-lt", valAxisLabelFontFace: "+mn-lt", catAxisLabelColor: MUTED, valAxisLabelColor: MUTED,
       valGridLine: { color: "E1E7EC", size: 0.5 }, catGridLine: { style: "none" }, showTitle: true, title: "Best val ID position RMSE at 1 s [m]", titleFontSize: 13, titleColor: NAVY, titleFontFace: "+mn-lt", valAxisMaxVal: 0.3, valAxisMinVal: 0 });
-  bullets(s, ["9 runs, 3 per GPU, launched 27 Nov 07:42", "Done: B2, B4, B4 (B3 width), B5b. Still running: B3, B3 small, B5a, both B6b", "B6b (oracle wrench input): 0.050 m with future wrench, 0.065 m with current", "B2, B5a, B5b become unstable after epoch 20; best checkpoint kept", "Next: evaluate on all roles; this is where known-vehicle physics should show"], 9.0, 1.5, 3.8, 5.2, 14);
+  stat(s, 9.2, 1.5, 3.5, "0.165 m", "B3, best non-oracle (stage 1: 0.177)", TEAL);
+  stat(s, 9.2, 3.0, 3.5, "0.035 m", "B6b with oracle wrench (future)", PURPLE);
+  bullets(s, ["All 9 runs done on 27 Nov, 3 per GPU", "B3 and B3 small took the full 60 epochs; B2, B4, B5b stopped early", "B2, B5a, B5b become unstable after horizon 20; best checkpoint kept"], 9.2, 4.6, 3.6, 2.3, 13);
 }
+
+{
+  const s = content("Known-vehicle evaluation on all test roles: B3 against B2",
+    "2:00. Position RMSE at 1 s on the test roles, one seed. B3 beats B2 on six of seven roles: test ID 0.164 against 0.220, direction, temporal, gust, physics and trajectory. It does not on OOD wind magnitude: B2 is 0.386 and B3 0.462. B4 at B3 width is 0.315, near the constant-velocity reference 0.282. So H1 holds except on the primary axis. Single seed and 136 to 245 episodes per OOD role: do not overstate.");
+  const L = ["Test ID", "OOD magnitude", "OOD direction", "OOD temporal", "OOD gust", "OOD physics", "OOD trajectory"];
+  s.addChart(pres.charts.BAR, [
+    { name: "B2 pure neural", labels: L, values: [0.220, 0.386, 0.134, 0.121, 0.135, 0.292, 0.215] },
+    { name: "B3 proposed", labels: L, values: [0.164, 0.462, 0.114, 0.105, 0.101, 0.270, 0.136] },
+    { name: "B4 (B3 width)", labels: L, values: [0.191, 0.315, 0.087, 0.085, 0.104, 0.304, 0.153] },
+    { name: "Constant velocity", labels: L, values: [0.361, 0.282, 0.124, 0.123, 0.260, 0.322, 0.308] }],
+    { x: 0.5, y: 1.4, w: 8.6, h: 5.4, barDir: "col", barGrouping: "clustered", chartColors: [AMBER, TEAL, GREEN, "8A98A5"], showLegend: true, legendPos: "b", legendFontSize: 11, legendFontFace: "+mn-lt",
+      catAxisLabelFontSize: 10, valAxisLabelFontSize: 11, catAxisLabelFontFace: "+mn-lt", valAxisLabelFontFace: "+mn-lt", catAxisLabelColor: MUTED, valAxisLabelColor: MUTED, valGridLine: { color: "E1E7EC", size: 0.5 }, catGridLine: { style: "none" },
+      showTitle: true, title: "Position RMSE at 1 s, known-vehicle runs, one seed [m]", titleFontSize: 13, titleColor: NAVY, titleFontFace: "+mn-lt", valAxisMinVal: 0, valAxisMaxVal: 0.5 });
+  card(s, 9.4, 1.5, 3.3, 1.75, "Worked", "B3 beats B2 on 6 of 7 test roles (test ID 0.164 vs 0.220).", GREEN, 12);
+  card(s, 9.4, 3.4, 3.3, 1.75, "Did not work", "OOD wind magnitude: B3 0.462, B2 0.386, constant velocity 0.282.", RED, 12);
+  card(s, 9.4, 5.3, 3.3, 1.5, "Oracle", "B6b with wrench: 0.162 on OOD magnitude.", PURPLE, 12);
+}
+
+{
+  const s = content("Known-vehicle evaluation on all 13 roles: heat map",
+    "1:30. Position RMSE at 1 s on every role including the validation twins of the OOD roles. Darker is worse. B1 with true parameters is still the worst because it has no drag. The oracle rows B6a and B6b are the best by far: the information is learnable. Compare with the stage-1 heat map earlier: OOD physics improved the most.");
+  img(s, "heatmap_kv.png", 0.6, 1.4, 12.1, 4.7);
+  caption(s, "Log colour scale, metres. b1_kv and b6a_*_kv use each episode’s true vehicle parameters; b6b are trained with the oracle wrench as input.", 0.6, 6.2, 12.1);
+}
+
 section("Lessons and next steps");
 {
   const s = content("What worked, what did not, and why",
@@ -776,7 +786,7 @@ section("Lessons and next steps");
     T(s, head, { x: x + 0.25, y: 1.5, w: 5.5, h: 0.55, fontSize: 18, bold: true, color: WHITE, valign: "middle" });
     bullets(s, rows, x + 0.1, 2.25, 5.75, 4.6, 14);
   };
-  col(0.6, "Worked, and why", GREEN, ["Physics prior in distribution: B3 0.036 m vs B2 0.105 m (pilot); gravity, thrust and kinematics are exact so the network learns only the remainder", "Validated simulator and quality gates: trustworthy evidence; bugs were caught by tests and audit", "Counterfactual groups and per-group splits: no leakage between siblings", "Known-vehicle prior: removes the parameter mismatch (oracle 0.41 → 0.02 m)", "Audit discipline: constant-velocity baseline and checkpoint fix corrected earlier claims"]);
+  col(0.6, "Worked, and why", GREEN, ["Physics prior in distribution: B3 0.036 m vs B2 0.105 m (pilot); gravity, thrust and kinematics are exact so the network learns only the remainder", "Validated simulator and quality gates: trustworthy evidence; bugs were caught by tests and audit", "Counterfactual groups and per-group splits: no leakage between siblings", "Known-vehicle prior: removes the parameter mismatch (oracle 0.41 → 0.02 m); B3 0.164 vs B2 0.220 on test ID, 0.270 vs 0.292 on OOD physics", "Audit discipline: constant-velocity baseline and checkpoint fix corrected earlier claims"]);
   col(6.75, "Did not work, and why", RED, ["Physics prior on OOD wind magnitude: B3 ≈ B1; training wind never exceeded 3.7 m/s (fact); residual does not extrapolate (hypothesis: bounded training range, short history)", "Constant velocity beats learned models on OOD magnitude: reference was missing earlier (fact)", "B4 and B5b get worse as they train: cause not established", "Latent carries no wind information: probe R² ≤ 0 (fact); non-linear probe still to do", "Nominal-parameter physics at 1 s: mismatch up to 20 % (fact, r = 0.98)"]);
 }
 {
@@ -789,7 +799,7 @@ section("Lessons and next steps");
 {
   const s = content("Future work: seven tasks tied to the research questions",
     "1:30. Concrete list from the guide, updated for v7 being done. Primary experiment: B2 against B3 reliability curves and reliable imagination horizon under OOD wind magnitude with intervals over groups.");
-  const tasks = [["Finish known-vehicle training; evaluate on all roles", "RQ1", GREEN], ["Retrain B1–B6 on v7 with ≥ 3 seeds; horizon curriculum to 50 steps", "RQ1", TEAL], ["Test why the residual does not extrapolate: wind-range augmentation, OOD-aware checkpoint selection, longer history, stronger weight decay (0.1–1), non-linear probe, disturbance-supervision head", "RQ1, RQ2", AMBER],
+  const tasks = [["Seeds for the known-vehicle runs (training and evaluation done for seed 0)", "RQ1", GREEN], ["Retrain B1–B6 on v7 with ≥ 3 seeds; horizon curriculum to 50 steps", "RQ1", TEAL], ["Test why the residual does not extrapolate: wind-range augmentation, OOD-aware checkpoint selection, longer history, stronger weight decay (0.1–1), non-linear probe, disturbance-supervision head", "RQ1, RQ2", AMBER],
     ["Primary experiment: B2 vs B3 error growth and reliable imagination horizon under OOD wind, intervals over groups", "RQ1, RQ2", PURPLE], ["Ablations: physics mismatch, training-data size, with and without memory", "RQ3", TEAL], ["Decide B24 / B23 data issues; optional uncertainty head", "RQ4", MUTED], ["Thesis writing; update proposal text for design changes", "–", MUTED]];
   tasks.forEach((t, i) => {
     const y = 1.5 + i * 0.77;
@@ -804,7 +814,7 @@ section("Lessons and next steps");
   const s = content("Status against the thesis plan",
     "1:00. Done, running and still to do. The next stage is already running: known-vehicle training. Then evaluation on all roles, seeds, the OOD-failure tests and the primary B2 against B3 experiment.");
   const rows = [["Audit, plan, configuration architecture", "done", GREEN], ["Simulator physics validated in Isaac", "done", GREEN], ["Pilot v0.5 / v0.6 and 16 baseline runs, repeat sweep (29 runs)", "done", GREEN], ["Pilot v7 generated and quality-checked", "done, B23 / B24 decisions open", GREEN],
-    ["v7 stage-1 training (7 models) and evaluation", "done", GREEN], ["Known-vehicle training (9 runs)", "running", AMBER], ["Evaluation on all roles, seeds, reliable-horizon curves", "next", PURPLE], ["Tests of why the residual does not extrapolate", "next", PURPLE], ["Primary experiment B2 vs B3 and ablations (RQ1 to RQ3)", "next", PURPLE], ["Thesis writing", "continuing", MUTED]];
+    ["v7 stage-1 training (7 models) and evaluation", "done", GREEN], ["Known-vehicle training (9 runs) and evaluation on all roles", "done", GREEN], ["Seeds, reliable-horizon curves, B3 vs B2 intervals", "next", PURPLE], ["Tests of why the residual does not extrapolate", "next", PURPLE], ["Primary experiment B2 vs B3 and ablations (RQ1 to RQ3)", "next", PURPLE], ["Thesis writing", "continuing", MUTED]];
   rows.forEach((r, i) => {
     const y = 1.45 + i * 0.54;
     s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y, w: 12.1, h: 0.46, fill: { color: LIGHT }, line: { color: LIGHT }, rectRadius: 0.06 });
@@ -819,8 +829,8 @@ section("Lessons and next steps");
   s.addNotes("0:45 + timeline. Three bullets and one honest limitation. Do not claim H1 is confirmed. Thank the panel and invite questions.");
   T(s, "Summary", { x: 0.9, y: 0.7, w: 8, h: 0.7, fontSize: 36, bold: true, color: WHITE, fontFace: "Cambria" });
   const pts = [["1", "Trustworthy evidence", "A validated simulator, a 4,530-episode dataset with 44 quality checks passed, and 9 baselines evaluated per OOD role. A first pipeline was found unusable and replaced."],
-    ["2", "Mixed results, stated plainly", "The physics prior helps in distribution (B3 0.036 m vs B2 0.105 m, pilot), not yet on strong OOD wind, where a constant-velocity baseline wins. Causes: vehicle mismatch (established), residual extrapolation (hypothesis)."],
-    ["3", "Next stage is running", "Known-vehicle training of 9 models on v7 is in progress; evaluation on all roles, seeds and the reliable-horizon experiment follow."]];
+    ["2", "Mixed results, stated plainly", "The physics prior helps in distribution and on most OOD roles (v7: B3 0.164 m vs B2 0.220 m on test ID) but not on strong OOD wind magnitude (B3 0.462, B2 0.386, constant velocity 0.282). Causes: vehicle mismatch (established), residual extrapolation (hypothesis)."],
+    ["3", "Next stage is running", "With the known-vehicle prior B3 beats B2 on 6 of 7 test roles (not on OOD wind magnitude); next: seeds, tests of why the residual does not extrapolate, the reliable-horizon experiment."]];
   pts.forEach((p, i) => {
     const y = 1.7 + i * 1.45;
     s.addShape(pres.shapes.OVAL, { x: 0.9, y: y + 0.1, w: 0.7, h: 0.7, fill: { color: AMBER }, line: { color: AMBER } });
@@ -835,7 +845,7 @@ section("Backup");
   const s = content("Backup: likely questions and honest answers",
     "Backup slide. Use it when asked.");
   table(s, [["Question", "Answer"],
-    ["Is H1 supported?", "Partly. In distribution and for temporal and gust OOD, yes (pilot). On strong OOD wind magnitude, not yet: B3 ≈ physics only; constant velocity is better."],
+    ["Is H1 supported?", "Partly. On v7 with the known-vehicle prior B3 beats B2 on 6 of 7 test roles (test ID 0.164 vs 0.220 m). On OOD wind magnitude, no: B3 0.462, B2 0.386, constant velocity 0.282. One seed."],
     ["Why a simulator?", "Ground-truth state, wind and counterfactual pairs are needed to separate wind effects from controller reactions. Real-flight transfer is out of scope."],
     ["Leakage through the controller?", "Closed-loop u correlates with wind. Mitigations: Mode B replay, excitation, open-loop segments, permutation test (open loop p = 0.033 in v7)."],
     ["Why start from the true state?", "IMU-only start gave about 120° attitude error (yaw unobservable)."],

@@ -266,6 +266,7 @@
     ["B6b", "B3 with the oracle wrench as extra input", Y, Y, "residual", "Learned model given the disturbance"],
     ["CV", "Constant velocity (added in the audit)", N, N, N, "No-learning reference"]],
     0.6, 1.5, 12.1, [1.2, 4.6, 0.9, 1.1, 1.1, 3.2], { fs: 12, rh: 0.5, alignLeft: true });
+  caption(s, "Same windows, loss, curriculum and optimiser for all trained models; parameters matched to B3 (227k); B4 at B3 width 73k, B3 small 60k. B6 removes only the aerodynamic part of the error.", 0.6, 6.55, 12.1);
 }
 //@@baselines2
 {
@@ -407,7 +408,7 @@
   const s = content("Status against the thesis plan",
     "1:00. Done, running and still to do. The next stage is already running: known-vehicle training. Then evaluation on all roles, seeds, the OOD-failure tests and the primary B2 against B3 experiment.");
   const rows = [["Audit, plan, configuration architecture", "done", GREEN], ["Simulator physics validated in Isaac", "done", GREEN], ["Pilot v0.5 / v0.6 and 16 baseline runs, repeat sweep (29 runs)", "done", GREEN], ["Pilot v7 generated and quality-checked", "done, B23 / B24 decisions open", GREEN],
-    ["v7 stage-1 training (7 models) and evaluation", "done", GREEN], ["Known-vehicle training (9 runs)", "running", AMBER], ["Evaluation on all roles, seeds, reliable-horizon curves", "next", PURPLE], ["Tests of why the residual does not extrapolate", "next", PURPLE], ["Primary experiment B2 vs B3 and ablations (RQ1 to RQ3)", "next", PURPLE], ["Thesis writing", "continuing", MUTED]];
+    ["v7 stage-1 training (7 models) and evaluation", "done", GREEN], ["Known-vehicle training (9 runs) and evaluation on all roles", "done", GREEN], ["Seeds, reliable-horizon curves, B3 vs B2 intervals", "next", PURPLE], ["Tests of why the residual does not extrapolate", "next", PURPLE], ["Primary experiment B2 vs B3 and ablations (RQ1 to RQ3)", "next", PURPLE], ["Thesis writing", "continuing", MUTED]];
   rows.forEach((r, i) => {
     const y = 1.45 + i * 0.54;
     s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y, w: 12.1, h: 0.46, fill: { color: LIGHT }, line: { color: LIGHT }, rectRadius: 0.06 });
@@ -421,7 +422,7 @@
   const s = content("Backup: likely questions and honest answers",
     "Backup slide. Use it when asked.");
   table(s, [["Question", "Answer"],
-    ["Is H1 supported?", "Partly. In distribution and for temporal and gust OOD, yes (pilot). On strong OOD wind magnitude, not yet: B3 ≈ physics only; constant velocity is better."],
+    ["Is H1 supported?", "Partly. On v7 with the known-vehicle prior B3 beats B2 on 6 of 7 test roles (test ID 0.164 vs 0.220 m). On OOD wind magnitude, no: B3 0.462, B2 0.386, constant velocity 0.282. One seed."],
     ["Why a simulator?", "Ground-truth state, wind and counterfactual pairs are needed to separate wind effects from controller reactions. Real-flight transfer is out of scope."],
     ["Leakage through the controller?", "Closed-loop u correlates with wind. Mitigations: Mode B replay, excitation, open-loop segments, permutation test (open loop p = 0.033 in v7)."],
     ["Why start from the true state?", "IMU-only start gave about 120° attitude error (yaw unobservable)."],
@@ -439,4 +440,42 @@
     "M. A. Islam et al., “Physics-guided residual learning for phase-aware UAV trajectory prediction in urban environments,” Scientific Reports 16, 2026.", "P. Rao et al., “SkyJEPA: Learning Long-Horizon World Models for Zero-Shot Sim-to-Real Control of Quadrotors,” arXiv:2606.23444, 2026.", "Z. Liu et al., “AirDreamer: Generalist Drone Navigation with World Models,” arXiv:2606.03252, 2026.",
     "S. Zheng et al., “WorldFly: A World-Model-Based Vision-Language-Action Model for UAV Navigation,” arXiv:2606.06147, 2026.", "A. H. Zidan et al., “World Models: A Comprehensive Survey of Architectures, Methodologies, Reasoning Paradigms, and Applications,” arXiv:2606.00133, 2026."];
   T(s, refs.map((r, i) => ({ text: r, options: { breakLine: i < refs.length - 1, paraSpaceAfter: 5 } })), { x: 0.6, y: 1.4, w: 12.1, h: 5.5, fontSize: 12 });
+}
+//@@kvtrain2
+{
+  const s = content("Known-vehicle training finished: B3 is the best learned model",
+    "1:30. All nine runs finished on 27 Nov. Best validation position RMSE at 1 s. Every learned model improves slightly on stage 1. B3 reaches 0.165 m against 0.177 m, the best non-oracle result. B6b with the oracle wrench reaches 0.035 m (future) and 0.047 m (current). B2, B5a and B5b become unstable after the curriculum reaches horizon 20 but the best checkpoint is kept.");
+  s.addChart(pres.charts.BAR, [
+    { name: "Stage 1 (nominal physics)", labels: ["B2", "B3", "B3 small", "B4 (B3 width)", "B4", "B5a", "B5b"], values: [0.218, 0.177, 0.178, 0.178, 0.184, 0.239, 0.222] },
+    { name: "Known vehicle", labels: ["B2", "B3", "B3 small", "B4 (B3 width)", "B4", "B5a", "B5b"], values: [0.213, 0.165, 0.172, 0.169, 0.179, 0.233, 0.215] }],
+    { x: 0.5, y: 1.4, w: 8.4, h: 5.3, barDir: "col", barGrouping: "clustered", chartColors: ["8A98A5", TEAL], showValue: true, dataLabelFormatCode: "0.000", dataLabelFontSize: 9, dataLabelPosition: "outEnd", dataLabelFontFace: "+mn-lt", dataLabelColor: INK,
+      showLegend: true, legendPos: "b", legendFontSize: 11, legendFontFace: "+mn-lt", catAxisLabelFontSize: 11, valAxisLabelFontSize: 11, catAxisLabelFontFace: "+mn-lt", valAxisLabelFontFace: "+mn-lt", catAxisLabelColor: MUTED, valAxisLabelColor: MUTED,
+      valGridLine: { color: "E1E7EC", size: 0.5 }, catGridLine: { style: "none" }, showTitle: true, title: "Best val ID position RMSE at 1 s [m]", titleFontSize: 13, titleColor: NAVY, titleFontFace: "+mn-lt", valAxisMaxVal: 0.3, valAxisMinVal: 0 });
+  stat(s, 9.2, 1.5, 3.5, "0.165 m", "B3, best non-oracle (stage 1: 0.177)", TEAL);
+  stat(s, 9.2, 3.0, 3.5, "0.035 m", "B6b with oracle wrench (future)", PURPLE);
+  bullets(s, ["All 9 runs done on 27 Nov, 3 per GPU", "B3 and B3 small took the full 60 epochs; B2, B4, B5b stopped early", "B2, B5a, B5b become unstable after horizon 20; best checkpoint kept"], 9.2, 4.6, 3.6, 2.3, 13);
+}
+//@@kvres
+{
+  const s = content("Known-vehicle evaluation on all test roles: B3 against B2",
+    "2:00. Position RMSE at 1 s on the test roles, one seed. B3 beats B2 on six of seven roles: test ID 0.164 against 0.220, direction, temporal, gust, physics and trajectory. It does not on OOD wind magnitude: B2 is 0.386 and B3 0.462. B4 at B3 width is 0.315, near the constant-velocity reference 0.282. So H1 holds except on the primary axis. Single seed and 136 to 245 episodes per OOD role: do not overstate.");
+  const L = ["Test ID", "OOD magnitude", "OOD direction", "OOD temporal", "OOD gust", "OOD physics", "OOD trajectory"];
+  s.addChart(pres.charts.BAR, [
+    { name: "B2 pure neural", labels: L, values: [0.220, 0.386, 0.134, 0.121, 0.135, 0.292, 0.215] },
+    { name: "B3 proposed", labels: L, values: [0.164, 0.462, 0.114, 0.105, 0.101, 0.270, 0.136] },
+    { name: "B4 (B3 width)", labels: L, values: [0.191, 0.315, 0.087, 0.085, 0.104, 0.304, 0.153] },
+    { name: "Constant velocity", labels: L, values: [0.361, 0.282, 0.124, 0.123, 0.260, 0.322, 0.308] }],
+    { x: 0.5, y: 1.4, w: 8.6, h: 5.4, barDir: "col", barGrouping: "clustered", chartColors: [AMBER, TEAL, GREEN, "8A98A5"], showLegend: true, legendPos: "b", legendFontSize: 11, legendFontFace: "+mn-lt",
+      catAxisLabelFontSize: 10, valAxisLabelFontSize: 11, catAxisLabelFontFace: "+mn-lt", valAxisLabelFontFace: "+mn-lt", catAxisLabelColor: MUTED, valAxisLabelColor: MUTED, valGridLine: { color: "E1E7EC", size: 0.5 }, catGridLine: { style: "none" },
+      showTitle: true, title: "Position RMSE at 1 s, known-vehicle runs, one seed [m]", titleFontSize: 13, titleColor: NAVY, titleFontFace: "+mn-lt", valAxisMinVal: 0, valAxisMaxVal: 0.5 });
+  card(s, 9.4, 1.5, 3.3, 1.75, "Worked", "B3 beats B2 on 6 of 7 test roles (test ID 0.164 vs 0.220).", GREEN, 12);
+  card(s, 9.4, 3.4, 3.3, 1.75, "Did not work", "OOD wind magnitude: B3 0.462, B2 0.386, constant velocity 0.282.", RED, 12);
+  card(s, 9.4, 5.3, 3.3, 1.5, "Oracle", "B6b with wrench: 0.162 on OOD magnitude.", PURPLE, 12);
+}
+//@@kvheat
+{
+  const s = content("Known-vehicle evaluation on all 13 roles: heat map",
+    "1:30. Position RMSE at 1 s on every role including the validation twins of the OOD roles. Darker is worse. B1 with true parameters is still the worst because it has no drag. The oracle rows B6a and B6b are the best by far: the information is learnable. Compare with the stage-1 heat map earlier: OOD physics improved the most.");
+  img(s, "heatmap_kv.png", 0.6, 1.4, 12.1, 4.7);
+  caption(s, "Log colour scale, metres. b1_kv and b6a_*_kv use each episode’s true vehicle parameters; b6b are trained with the oracle wrench as input.", 0.6, 6.2, 12.1);
 }
